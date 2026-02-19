@@ -5,7 +5,8 @@ on:
     branches: [main]
 
 env:
-  IMAGE: ghcr.io/euxinedata/kolkhis
+  BACKEND_IMAGE: ghcr.io/euxinedata/kolkhis-backend
+  FRONTEND_IMAGE: ghcr.io/euxinedata/kolkhis-frontend
 
 jobs:
   build-and-deploy:
@@ -25,21 +26,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
-        run: |
-          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          docker build -t $IMAGE:$SHA -t $IMAGE:latest .
-          docker push $IMAGE:$SHA
-          docker push $IMAGE:latest
-          echo "SHA=$SHA" >> $GITHUB_ENV
+      - name: Set image tag
+        run: echo "SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_ENV
 
-      - name: Update image tag in pontus
+      - name: Build and push backend
+        run: |
+          docker build -t $BACKEND_IMAGE:$SHA -t $BACKEND_IMAGE:latest backend/
+          docker push $BACKEND_IMAGE:$SHA
+          docker push $BACKEND_IMAGE:latest
+
+      - name: Build and push frontend
+        run: |
+          docker build -t $FRONTEND_IMAGE:$SHA -t $FRONTEND_IMAGE:latest frontend/
+          docker push $FRONTEND_IMAGE:$SHA
+          docker push $FRONTEND_IMAGE:latest
+
+      - name: Update image tags in pontus
         run: |
           git clone https://x-access-token:${{ secrets.PONTUS_PAT }}@github.com/euxinedata/pontus.git /tmp/pontus
           cd /tmp/pontus
-          sed -i "s|image: $IMAGE:.*|image: $IMAGE:$SHA|" apps/kolkhis/deployment.yaml
+          sed -i "s|image: $BACKEND_IMAGE:.*|image: $BACKEND_IMAGE:$SHA|" apps/kolkhis/backend-deployment.yaml
+          sed -i "s|image: $FRONTEND_IMAGE:.*|image: $FRONTEND_IMAGE:$SHA|" apps/kolkhis/frontend-deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add apps/kolkhis/deployment.yaml
+          git add apps/kolkhis/
           git commit -m "deploy: kolkhis $SHA"
           git push
