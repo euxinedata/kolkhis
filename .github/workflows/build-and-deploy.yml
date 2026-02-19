@@ -1,0 +1,45 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE: ghcr.io/euxinedata/kolkhis
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout kolkhis
+        uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker build -t $IMAGE:$SHA -t $IMAGE:latest .
+          docker push $IMAGE:$SHA
+          docker push $IMAGE:latest
+          echo "SHA=$SHA" >> $GITHUB_ENV
+
+      - name: Update image tag in pontus
+        run: |
+          git clone https://x-access-token:${{ secrets.PONTUS_PAT }}@github.com/euxinedata/pontus.git /tmp/pontus
+          cd /tmp/pontus
+          sed -i "s|image: $IMAGE:.*|image: $IMAGE:$SHA|" apps/kolkhis/deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/kolkhis/deployment.yaml
+          git commit -m "deploy: kolkhis $SHA"
+          git push
