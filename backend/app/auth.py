@@ -84,15 +84,21 @@ async def callback_google(request: Request):
     return response
 
 
-@router.get("/me")
-async def me(request: Request):
+def verify_token(request: Request) -> dict | None:
     tok = request.cookies.get(_COOKIE_NAME)
     if not tok:
-        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        return None
     try:
-        payload = jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
+        return jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
     except jwt.InvalidTokenError:
-        return JSONResponse({"detail": "Invalid token"}, status_code=401)
+        return None
+
+
+@router.get("/me")
+async def me(request: Request):
+    payload = verify_token(request)
+    if payload is None:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
     return {"id": payload["sub"], "email": payload["email"], "name": payload["name"]}
 
 
