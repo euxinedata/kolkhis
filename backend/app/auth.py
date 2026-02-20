@@ -104,6 +104,6 @@ async def me(request: Request):
 
 @router.post("/logout")
 async def logout():
-    response = RedirectResponse(url=FRONTEND_URL, status_code=302)
+    response = JSONResponse({"detail": "Logged out"})
     response.delete_cookie(_COOKIE_NAME, **_cookie_kwargs())
     return response
