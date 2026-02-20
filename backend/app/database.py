@@ -1,13 +1,10 @@
-import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql+asyncpg://kolkhis:kolkhis-dev-2026@localhost:5432/kolkhis"
-)
+from app.config import DATABASE_URL_ASYNC
 
-engine = create_async_engine(DATABASE_URL)
+engine = create_async_engine(DATABASE_URL_ASYNC)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 

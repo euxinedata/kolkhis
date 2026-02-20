@@ -1,0 +1,21 @@
+[project]
+name = "kolkhis-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "authlib>=1.6.8",
+    "fastapi>=0.129.0",
+    "httpx>=0.28.1",
+    "itsdangerous>=2.2.0",
+    "psycopg2-binary>=2.9.11",
+    "pycountry>=26.2.16",
+    "pyjwt>=2.11.0",
+    "python-dotenv>=1.2.1",
+    "python-multipart>=0.0.22",
+    "sqlalchemy[asyncio]>=2.0.46",
+    "uvicorn>=0.41.0",
+]

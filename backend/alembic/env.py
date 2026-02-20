@@ -1,10 +1,10 @@
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
+from app.config import DATABASE_URL_SYNC
 from app.models import Base
 
 config = context.config
@@ -14,10 +14,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql+psycopg2://kolkhis:kolkhis-dev-2026@localhost:5432/kolkhis"
-)
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", DATABASE_URL_SYNC)
 
 
 def run_migrations_offline() -> None:
