@@ -68,7 +68,7 @@ async def callback_google(request: Request):
         else:
             user.name = userinfo.get("name", user.name)
             user.picture_url = userinfo.get("picture", user.picture_url)
-            user.last_login = datetime.now(timezone.utc)
+            user.last_login = datetime.utcnow()
 
         await session.commit()
         await session.refresh(user)
