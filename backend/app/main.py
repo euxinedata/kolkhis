@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
@@ -10,7 +12,7 @@ from app.config import JWT_SECRET, FRONTEND_URL
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
 from app.seed import seed_countries
-from app.auth import router as auth_router
+from app.auth import router as auth_router, verify_token
 
 
 @asynccontextmanager
@@ -23,7 +25,7 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +37,30 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 
 app.include_router(auth_router)
+
+
+_UNAUTH = JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi_json(request: Request):
+    if verify_token(request) is None:
+        return _UNAUTH
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False)
+async def docs(request: Request):
+    if verify_token(request) is None:
+        return _UNAUTH
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="docs")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def redoc(request: Request):
+    if verify_token(request) is None:
+        return _UNAUTH
+    return get_redoc_html(openapi_url="/openapi.json", title="redoc")
 
 
 @app.get("/health")
