@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 import duckdb
 import pyarrow as pa
@@ -61,22 +61,21 @@ async def _update_job(job_id: str, **kwargs):
 
 
 async def execute_query(job_id: str, sql: str):
-    now = datetime.now(timezone.utc)
-    await _update_job(job_id, status="running", started_at=now)
+    await _update_job(job_id, status="running", started_at=datetime.utcnow())
     try:
         row_count = await asyncio.to_thread(_run_duckdb, sql, job_id)
         await _update_job(
             job_id,
             status="completed",
             row_count=row_count,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.utcnow(),
         )
     except Exception as e:
         await _update_job(
             job_id,
             status="failed",
             error=str(e)[:2048],
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.utcnow(),
         )
 
 
