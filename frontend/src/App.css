@@ -1,42 +1,116 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-.logo {
-  height: 6em;
+/* Login screen */
+.login-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1em;
+}
+.login-subtitle {
+  color: #8888bb;
+  margin: 0;
+}
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: #8888bb;
+}
+
+/* Navigation */
+.app-nav {
+  display: flex;
+  align-items: center;
+  padding: 0.75em 1.5em;
+  border-bottom: 1px solid #2a2a4a;
+  gap: 2em;
+}
+.app-title {
+  font-weight: 700;
+  font-size: 1.1em;
+  color: #646cff;
+}
+.nav-links {
+  display: flex;
+  gap: 1.5em;
+}
+.nav-links a {
+  color: #8888bb;
+  font-size: 0.9em;
+  padding: 0.25em 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+.nav-links a:hover {
+  color: rgba(255, 255, 255, 0.87);
+}
+.nav-links a.active {
+  color: #646cff;
+  border-bottom-color: #646cff;
+}
+.nav-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+.user-name {
+  font-size: 0.85em;
+  color: #8888bb;
+}
+.btn-signout {
+  font-size: 0.8em;
+  padding: 0.3em 0.8em;
+}
+
+/* Main content */
+.app-main {
+  flex: 1;
   padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+/* Status badges */
+.status-completed { color: #4ade80; }
+.status-failed { color: #f87171; }
+.status-running { color: #fbbf24; }
+.status-pending { color: #8888bb; }
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin-top: 1em;
+  font-size: 0.85em;
+  color: #8888bb;
+}
+
+/* Table container for horizontal scroll */
+.table-container {
+  overflow-x: auto;
+  margin-top: 1em;
+}
+
+@media (prefers-color-scheme: light) {
+  .app-nav {
+    border-bottom-color: #e0e0ea;
   }
-  to {
-    transform: rotate(360deg);
+  .nav-links a {
+    color: #666688;
   }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+  .nav-links a:hover {
+    color: #213547;
   }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
 }
