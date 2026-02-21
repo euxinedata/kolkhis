@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -8,15 +9,19 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import JWT_SECRET, FRONTEND_URL
+from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
 from app.seed import seed_countries
 from app.auth import router as auth_router, verify_token
+from app.routers.catalog import router as catalog_router
+from app.routers.queries import router as queries_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    os.makedirs(RESULTS_PATH, exist_ok=True)
+    os.makedirs(WAREHOUSE_PATH, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with async_session() as session:
@@ -37,6 +42,8 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 
 app.include_router(auth_router)
+app.include_router(catalog_router)
+app.include_router(queries_router)
 
 
 _UNAUTH = JSONResponse({"detail": "Not authenticated"}, status_code=401)

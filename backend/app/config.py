@@ -26,3 +26,14 @@ DATABASE_URL_SYNC = (
     f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
     f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
+
+# PyIceberg needs a plain postgresql:// URI (no driver suffix)
+DATABASE_URL_PLAIN = (
+    f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+    f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+)
+
+WAREHOUSE_PATH = os.environ.get("WAREHOUSE_PATH", "/mnt/warehouse")
+RESULTS_PATH = os.environ.get("RESULTS_PATH", "/tmp/warehouse-results")
+MAX_RESULT_ROWS = int(os.environ.get("MAX_RESULT_ROWS", "100000"))
+RESULTS_PAGE_SIZE = int(os.environ.get("RESULTS_PAGE_SIZE", "100"))

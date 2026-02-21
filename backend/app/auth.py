@@ -1,7 +1,7 @@
 import jwt
 from authlib.integrations.starlette_client import OAuth
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 
@@ -92,6 +92,13 @@ def verify_token(request: Request) -> dict | None:
         return jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
     except jwt.InvalidTokenError:
         return None
+
+
+async def require_auth(request: Request) -> dict:
+    payload = verify_token(request)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return payload
 
 
 @router.get("/me")
