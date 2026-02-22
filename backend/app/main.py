@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
-from app.seed import seed_countries
+from app.seed import seed_catalog, seed_countries
 from app.auth import router as auth_router, verify_token
 from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     async with async_session() as session:
         await seed_countries(session)
+    async with async_session() as session:
+        await seed_catalog(session)
     yield
     await engine.dispose()
 
