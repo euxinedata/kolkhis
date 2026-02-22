@@ -18,7 +18,7 @@ interface ObjectSchema {
   sql?: string
 }
 
-export function CatalogPanel() {
+export function CatalogPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   const [databases, setDatabases] = useState<string[]>([])
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [schemas, setSchemas] = useState<Record<string, string[]>>({})
@@ -31,6 +31,13 @@ export function CatalogPanel() {
       setDatabases(dbs.map(d => d.name))
     )
   }, [])
+
+  // Invalidate cached objects when refreshKey changes (e.g. after DDL)
+  useEffect(() => {
+    if (refreshKey > 0) {
+      setObjects({})
+    }
+  }, [refreshKey])
 
   async function toggleDatabase(db: string) {
     const key = db
