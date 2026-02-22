@@ -86,6 +86,7 @@ export function CatalogPanel() {
               onClick={() => toggleDatabase(db)}
             >
               <span className="tree-arrow">{expanded[db] ? '▾' : '▸'}</span>
+              <span className="tree-type-badge tree-icon-db">DB</span>
               {db}
             </div>
             {expanded[db] && schemas[db]?.map(schema => {
@@ -99,6 +100,7 @@ export function CatalogPanel() {
                     <span className="tree-arrow">
                       {expanded[schemaKey] ? '▾' : '▸'}
                     </span>
+                    <span className="tree-type-badge tree-icon-schema">S</span>
                     {schema}
                   </div>
                   {expanded[schemaKey] && objects[schemaKey]?.map(obj => {
@@ -109,7 +111,7 @@ export function CatalogPanel() {
                           className={`tree-node tree-object ${selectedObject === objKey ? 'tree-selected' : ''}`}
                           onClick={() => selectObject(db, schema, obj.name)}
                         >
-                          <span className="tree-type-badge">
+                          <span className={`tree-type-badge ${obj.type === 'table' ? 'tree-icon-table' : 'tree-icon-view'}`}>
                             {obj.type === 'table' ? 'T' : 'V'}
                           </span>
                           {obj.name}

@@ -182,6 +182,10 @@
   text-align: center;
   flex-shrink: 0;
 }
+.tree-icon-db     { color: #646cff; width: 1.8em; }
+.tree-icon-schema { color: #4ade80; }
+.tree-icon-table  { color: #fbbf24; }
+.tree-icon-view   { color: #8888bb; }
 
 .tree-columns {
   padding: 0.2em 0 0.3em 2.8em;
@@ -269,4 +273,8 @@
     background: #f5f5fa;
     color: #555;
   }
+  .tree-icon-db     { color: #4a50c8; }
+  .tree-icon-schema { color: #16a34a; }
+  .tree-icon-table  { color: #d97706; }
+  .tree-icon-view   { color: #6666aa; }
 }
