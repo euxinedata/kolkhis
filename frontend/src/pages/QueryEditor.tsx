@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Editor, type Monaco } from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 import { apiFetch, API_URL } from '../api'
 import { CatalogPanel } from '../components/CatalogPanel'
 
@@ -19,14 +21,18 @@ interface JobStatus {
 }
 
 export function QueryEditor() {
-  const [sql, setSql] = useState('')
+  const [sql, setSql] = useState(() => localStorage.getItem('kolkhis_sql') ?? '')
   const [jobId, setJobId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [catalogOpen, setCatalogOpen] = useState(true)
+  const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const submitRef = useRef<() => void>(() => {})
+
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -70,6 +76,7 @@ export function QueryEditor() {
         if (job.status === 'completed') {
           if (pollRef.current) clearInterval(pollRef.current)
           setError(null)
+          setCatalogRefreshKey(k => k + 1)
           await fetchResults(id, 0)
         } else if (job.status === 'failed') {
           if (pollRef.current) clearInterval(pollRef.current)
@@ -84,6 +91,15 @@ export function QueryEditor() {
   async function fetchResults(id: string, page: number) {
     const data = await apiFetch<QueryResult>(`/api/queries/${id}/results?page=${page}`)
     setResult(data)
+  }
+
+  function handleEditorMount(editorInstance: editor.IStandaloneCodeEditor, monaco: Monaco) {
+    editorInstance.addAction({
+      id: 'run-query',
+      label: 'Run Query',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => submitRef.current(),
+    })
   }
 
   async function handleSubmit() {
@@ -108,6 +124,8 @@ export function QueryEditor() {
     }
   }
 
+  submitRef.current = handleSubmit
+
   async function handlePage(page: number) {
     if (!jobId) return
     await fetchResults(jobId, page)
@@ -129,7 +147,7 @@ export function QueryEditor() {
               ✕
             </button>
           </div>
-          <CatalogPanel />
+          <CatalogPanel refreshKey={catalogRefreshKey} />
         </aside>
       )}
       <div className="query-main">
@@ -145,19 +163,24 @@ export function QueryEditor() {
           )}
           <h2 style={{ margin: 0 }}>Query Editor</h2>
         </div>
-        <textarea
-          value={sql}
-          onChange={e => setSql(e.target.value)}
-          onKeyDown={e => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-              e.preventDefault()
-              handleSubmit()
-            }
-          }}
-          placeholder="SELECT * FROM database.schema.table"
-          rows={6}
-          style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace' }}
-        />
+        <div style={{ border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
+          <Editor
+            height="200px"
+            language="sql"
+            theme={prefersDark ? 'vs-dark' : 'vs'}
+            value={sql}
+            onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
+            onMount={handleEditorMount}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              padding: { top: 8 },
+            }}
+          />
+        </div>
         <div style={{ display: 'flex', gap: '1em', marginTop: '0.5em', alignItems: 'center' }}>
           <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
             {submitting ? 'Submitting...' : 'Run Query'}
