@@ -80,10 +80,14 @@
 }
 
 /* Query layout: sidebar + editor */
+.app-main:has(.query-layout) {
+  padding: 0;
+}
+
 .query-layout {
   display: flex;
   gap: 0;
-  height: calc(100vh - 5em);
+  height: calc(100vh - 3em);
 }
 
 .catalog-sidebar {
@@ -135,8 +139,62 @@
 .query-main {
   flex: 1;
   min-width: 0;
-  padding: 0 0 0 1.5em;
-  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.results-panel {
+  max-height: 33vh;
+  border-top: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3em 0.5em;
+  font-size: 0.8em;
+  color: #8888bb;
+  flex-shrink: 0;
+}
+
+.results-close {
+  background: none;
+  border: none;
+  color: #8888bb;
+  font-size: 0.9em;
+  cursor: pointer;
+  padding: 0.1em 0.4em;
+  line-height: 1;
+}
+.results-close:hover {
+  color: rgba(255, 255, 255, 0.87);
+  background: none;
+  border: none;
+}
+
+.results-panel .table-container {
+  flex: 1;
+  overflow: auto;
+  margin-top: 0;
+}
+
+.results-panel .pagination {
+  margin-top: 0;
+  padding: 0.5em;
+  flex-shrink: 0;
 }
 
 /* Catalog tree */
@@ -221,6 +279,7 @@
 .status-failed { color: #f87171; }
 .status-running { color: #fbbf24; }
 .status-pending { color: #8888bb; }
+.status-cancelled { color: #94a3b8; }
 
 /* Pagination */
 .pagination {
@@ -272,6 +331,12 @@
   .tree-view-sql {
     background: #f5f5fa;
     color: #555;
+  }
+  .results-panel {
+    border-top-color: #e0e0ea;
+  }
+  .results-close:hover {
+    color: #213547;
   }
   .tree-icon-db     { color: #4a50c8; }
   .tree-icon-schema { color: #16a34a; }

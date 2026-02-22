@@ -13,9 +13,17 @@ interface QueryJob {
   created_at: string | null
 }
 
-function formatDuration(started: string | null, completed: string | null): string {
-  if (!started || !completed) return '-'
-  const ms = new Date(completed).getTime() - new Date(started).getTime()
+function parseUTC(ts: string): number {
+  return new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime()
+}
+
+function formatDuration(started: string | null, completed: string | null, status?: string): string {
+  if (!started) return '-'
+  const end = completed
+    ? parseUTC(completed)
+    : (status === 'pending' || status === 'running') ? Date.now() : null
+  if (end === null) return '-'
+  const ms = end - parseUTC(started)
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
 }
@@ -28,20 +36,42 @@ function truncateSql(sql: string, max = 80): string {
 export function QueryHistory() {
   const [jobs, setJobs] = useState<QueryJob[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [, setTick] = useState(0)
   const navigate = useNavigate()
 
+  function fetchJobs() {
+    return apiFetch<QueryJob[]>('/api/queries').then(setJobs)
+  }
+
   useEffect(() => {
-    apiFetch<QueryJob[]>('/api/queries')
-      .then(setJobs)
-      .finally(() => setLoading(false))
+    fetchJobs().finally(() => setLoading(false))
   }, [])
+
+  function handleRefresh() {
+    setRefreshing(true)
+    fetchJobs().finally(() => setRefreshing(false))
+  }
+
+  // Re-render every second while any job is still active
+  useEffect(() => {
+    const hasActive = jobs.some(j => j.status === 'pending' || j.status === 'running')
+    if (!hasActive) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [jobs])
 
   if (loading) return <p style={{ color: '#8888bb' }}>Loading...</p>
 
   if (jobs.length === 0) {
     return (
       <div>
-        <h2>Query History</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1em' }}>
+          <h2>Query History</h2>
+          <button onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
         <p style={{ color: '#8888bb' }}>No queries yet.</p>
       </div>
     )
@@ -49,7 +79,12 @@ export function QueryHistory() {
 
   return (
     <div>
-      <h2>Query History</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1em' }}>
+        <h2>Query History</h2>
+        <button onClick={handleRefresh} disabled={refreshing}>
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
       <div className="table-container">
         <table>
           <thead>
@@ -74,7 +109,7 @@ export function QueryHistory() {
                 <td>
                   <span className={`status-${job.status}`}>{job.status}</span>
                 </td>
-                <td>{formatDuration(job.started_at, job.completed_at)}</td>
+                <td>{formatDuration(job.started_at, job.completed_at, job.status)}</td>
                 <td>{job.row_count ?? '-'}</td>
                 <td style={{ fontSize: '0.85em', color: '#8888bb' }}>
                   {job.created_at ? new Date(job.created_at).toLocaleString() : '-'}
