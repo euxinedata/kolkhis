@@ -27,6 +27,9 @@ node_modules/
 .claude/*
 !.claude/skills/
 
+# DuckDB temp storage
+backend/.tmp/
+
 # OS
 .DS_Store
 Thumbs.db
