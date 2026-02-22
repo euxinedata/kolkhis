@@ -119,6 +119,12 @@ export function QueryEditor() {
       <textarea
         value={sql}
         onChange={e => setSql(e.target.value)}
+        onKeyDown={e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault()
+            handleSubmit()
+          }
+        }}
         placeholder="SELECT * FROM namespace.table"
         rows={6}
         style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace' }}
