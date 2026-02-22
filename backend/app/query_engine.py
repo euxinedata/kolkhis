@@ -78,9 +78,10 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
         conn.install_extension("iceberg")
         conn.load_extension("iceberg")
 
-        # Register objects from metadata layer
+        # Register objects from metadata layer (tables first so views can reference them)
         created_schemas: set[str] = set()
-        for obj in catalog_objects:
+        sorted_objects = sorted(catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
+        for obj in sorted_objects:
             duckdb_schema = f"{obj['database']}__{obj['schema']}"
 
             if duckdb_schema not in created_schemas:
@@ -95,9 +96,10 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
                     f"SELECT * FROM iceberg_scan('{metadata_path}')"
                 )
             elif obj["object_type"] == "view" and obj["view_sql"]:
+                view_sql = _rewrite_three_part_names(obj["view_sql"], catalog_objects)
                 conn.execute(
                     f'CREATE VIEW "{duckdb_schema}"."{obj["name"]}" AS '
-                    f'{obj["view_sql"]}'
+                    f'{view_sql}'
                 )
 
         # Rewrite three-part names to DuckDB two-part names
