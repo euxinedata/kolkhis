@@ -2,7 +2,6 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
-import { CatalogBrowser } from './pages/CatalogBrowser.tsx'
 import './App.css'
 
 function App() {
@@ -29,7 +28,6 @@ function App() {
         <div className="nav-links">
           <NavLink to="/" end>Query</NavLink>
           <NavLink to="/history">History</NavLink>
-          <NavLink to="/catalog">Catalog</NavLink>
         </div>
         <div className="nav-user">
           <span className="user-name">{user.name}</span>
@@ -40,7 +38,6 @@ function App() {
         <Routes>
           <Route path="/" element={<QueryEditor />} />
           <Route path="/history" element={<QueryHistory />} />
-          <Route path="/catalog" element={<CatalogBrowser />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
