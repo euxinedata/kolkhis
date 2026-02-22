@@ -5,14 +5,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.config import RESULTS_PAGE_SIZE
 from app.database import get_db
 from app.models import QueryJob
-from app.query_engine import _result_path, submit_query
+from app.query_engine import _result_path, cancel_query, submit_query
 
 router = APIRouter(prefix="/api/queries")
 
@@ -85,6 +85,35 @@ async def get_query(
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         "created_at": job.created_at.isoformat() if job.created_at else None,
     }
+
+
+@router.post("/{job_id}/cancel")
+async def cancel_query_endpoint(
+    job_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(QueryJob).where(
+            QueryJob.id == job_id, QueryJob.user_id == int(user["sub"])
+        )
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Query not found")
+    if job.status not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail=f"Query is already {job.status}")
+    cancelled = await cancel_query(job_id)
+    if not cancelled:
+        # Task already finished — update DB directly
+        from datetime import datetime
+        await db.execute(
+            update(QueryJob).where(QueryJob.id == job_id).values(
+                status="cancelled", completed_at=datetime.utcnow()
+            )
+        )
+        await db.commit()
+    return {"status": "cancelled"}
 
 
 @router.get("/{job_id}/results")

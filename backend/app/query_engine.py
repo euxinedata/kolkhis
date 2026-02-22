@@ -14,6 +14,7 @@ from app.models import CatalogObject, Database, QueryJob, Schema
 from app.warehouse import catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
+_running_conns: dict[str, duckdb.DuckDBPyConnection] = {}
 
 _CREATE_VIEW_RE = re.compile(
     r"^\s*CREATE\s+(?:(OR\s+REPLACE)\s+)?VIEW\s+"
@@ -216,6 +217,7 @@ def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
 def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     """Run a SQL query via DuckDB against registered catalog objects. Returns row count."""
     conn = duckdb.connect()
+    _running_conns[job_id] = conn
     try:
         conn.install_extension("iceberg")
         conn.load_extension("iceberg")
@@ -265,6 +267,7 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
         pq.write_table(arrow_table, _result_path(job_id))
         return row_count
     finally:
+        _running_conns.pop(job_id, None)
         conn.close()
 
 
@@ -315,6 +318,10 @@ async def execute_query(job_id: str, sql: str):
             row_count=row_count,
             completed_at=datetime.utcnow(),
         )
+    except asyncio.CancelledError:
+        await _update_job(job_id, status="cancelled", completed_at=datetime.utcnow())
+    except duckdb.InterruptException:
+        await _update_job(job_id, status="cancelled", completed_at=datetime.utcnow())
     except Exception as e:
         await _update_job(
             job_id,
@@ -322,6 +329,18 @@ async def execute_query(job_id: str, sql: str):
             error=str(e)[:2048],
             completed_at=datetime.utcnow(),
         )
+
+
+async def cancel_query(job_id: str) -> bool:
+    task = _running_tasks.get(job_id)
+    if task is None:
+        return False
+    # Interrupt the DuckDB connection so the thread stops immediately
+    conn = _running_conns.get(job_id)
+    if conn is not None:
+        conn.interrupt()
+    task.cancel()
+    return True
 
 
 def submit_query(job_id: str, sql: str):

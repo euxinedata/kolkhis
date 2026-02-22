@@ -18,6 +18,16 @@ interface JobStatus {
   status: string
   error: string | null
   row_count: number | null
+  started_at: string | null
+}
+
+function parseUTC(ts: string): number {
+  return new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime()
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
 }
 
 export function QueryEditor() {
@@ -27,6 +37,8 @@ export function QueryEditor() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [startedAt, setStartedAt] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState<string | null>(null)
   const [catalogOpen, setCatalogOpen] = useState(true)
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -52,11 +64,23 @@ export function QueryEditor() {
     }
   }, [])
 
+  // Tick elapsed time while query is active
+  useEffect(() => {
+    if (!(status === 'pending' || status === 'running') || !startedAt) {
+      return
+    }
+    const tick = () => setElapsed(formatElapsed(Date.now() - parseUTC(startedAt)))
+    tick()
+    const id = setInterval(tick, 100)
+    return () => clearInterval(id)
+  }, [status, startedAt])
+
   async function loadJob(id: string) {
     try {
       const job = await apiFetch<JobStatus>(`/api/queries/${id}`)
       setStatus(job.status)
       setError(job.error)
+      if (job.started_at) setStartedAt(job.started_at)
       if (job.status === 'completed') {
         await fetchResults(id, 0)
       } else if (job.status === 'pending' || job.status === 'running') {
@@ -73,6 +97,7 @@ export function QueryEditor() {
       try {
         const job = await apiFetch<JobStatus>(`/api/queries/${id}`)
         setStatus(job.status)
+        if (job.started_at) setStartedAt(job.started_at)
         if (job.status === 'completed') {
           if (pollRef.current) clearInterval(pollRef.current)
           setError(null)
@@ -81,6 +106,9 @@ export function QueryEditor() {
         } else if (job.status === 'failed') {
           if (pollRef.current) clearInterval(pollRef.current)
           setError(job.error)
+        } else if (job.status === 'cancelled') {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setError(null)
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current)
@@ -108,6 +136,8 @@ export function QueryEditor() {
     setError(null)
     setResult(null)
     setStatus(null)
+    setStartedAt(null)
+    setElapsed(null)
     try {
       const { job_id } = await apiFetch<{ job_id: string }>('/api/queries', {
         method: 'POST',
@@ -121,6 +151,18 @@ export function QueryEditor() {
       setError(e instanceof Error ? e.message : 'Submit failed')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleCancel() {
+    if (!jobId) return
+    try {
+      await apiFetch(`/api/queries/${jobId}/cancel`, { method: 'POST' })
+      if (pollRef.current) clearInterval(pollRef.current)
+      setStatus('cancelled')
+      setError(null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Cancel failed')
     }
   }
 
@@ -151,63 +193,72 @@ export function QueryEditor() {
         </aside>
       )}
       <div className="query-main">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75em', marginBottom: '0.5em' }}>
+        <div className="editor-area">
           {!catalogOpen && (
-            <button
-              className="catalog-toggle"
-              onClick={() => setCatalogOpen(true)}
-              title="Show catalog"
-            >
-              ☰
-            </button>
+            <div style={{ flexShrink: 0 }}>
+              <button
+                className="catalog-toggle"
+                onClick={() => setCatalogOpen(true)}
+                title="Show catalog"
+              >
+                ☰
+              </button>
+            </div>
           )}
-          <h2 style={{ margin: 0 }}>Query Editor</h2>
-        </div>
-        <div style={{ border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
-          <Editor
-            height="200px"
-            language="sql"
-            theme={prefersDark ? 'vs-dark' : 'vs'}
-            value={sql}
-            onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
-            onMount={handleEditorMount}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              padding: { top: 8 },
-            }}
-          />
-        </div>
-        <div style={{ display: 'flex', gap: '1em', marginTop: '0.5em', alignItems: 'center' }}>
-          <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
-            {submitting ? 'Submitting...' : 'Run Query'}
-          </button>
-          {status && (
-            <span className={`status-${status}`}>
-              {status}
-            </span>
-          )}
-          {jobId && status === 'completed' && (
-            <a
-              href={`${API_URL}/api/queries/${jobId}/export`}
-              style={{ fontSize: '0.85em' }}
-            >
-              Download CSV
-            </a>
-          )}
+          <div style={{ flex: 1, minHeight: 0, border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
+            <Editor
+              height="100%"
+              language="sql"
+              theme={prefersDark ? 'vs-dark' : 'vs'}
+              value={sql}
+              onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
+              onMount={handleEditorMount}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                padding: { top: 8 },
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '1em', padding: '1em 0', alignItems: 'center', flexShrink: 0 }}>
+            {status === 'pending' || status === 'running' ? (
+              <button onClick={handleCancel}>Cancel</button>
+            ) : (
+              <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
+                {submitting ? 'Submitting...' : 'Run Query'}
+              </button>
+            )}
+            {status && (
+              <span className={`status-${status}`}>
+                {status}{elapsed && (status === 'pending' || status === 'running') ? `  ${elapsed}` : ''}
+              </span>
+            )}
+            {jobId && status === 'completed' && (
+              <a
+                href={`${API_URL}/api/queries/${jobId}/export`}
+                style={{ fontSize: '0.85em' }}
+              >
+                Download CSV
+              </a>
+            )}
+          </div>
         </div>
 
         {error && (
-          <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em' }}>
+          <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em', flexShrink: 0 }}>
             {error}
           </pre>
         )}
 
         {result && (
-          <>
+          <div className="results-panel">
+            <div className="results-header">
+              <span>{result.total} rows</span>
+              <button className="results-close" onClick={() => setResult(null)} title="Close results">✕</button>
+            </div>
             <div className="table-container">
               <table>
                 <thead>
@@ -237,7 +288,7 @@ export function QueryEditor() {
                 Next
               </button>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
