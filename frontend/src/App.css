@@ -13,6 +13,11 @@
   min-height: 100vh;
   gap: 1em;
 }
+.login-logo {
+  width: 96px;
+  height: 96px;
+  filter: invert(1);
+}
 .login-subtitle {
   color: #8888bb;
   margin: 0;
@@ -35,9 +40,17 @@
   gap: 2em;
 }
 .app-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
   font-weight: 700;
   font-size: 1.1em;
   color: #646cff;
+}
+.nav-logo {
+  width: 24px;
+  height: 24px;
+  filter: invert(1);
 }
 .nav-links {
   display: flex;
@@ -337,6 +350,10 @@
   }
   .results-close:hover {
     color: #213547;
+  }
+  .login-logo,
+  .nav-logo {
+    filter: none;
   }
   .tree-icon-db     { color: #4a50c8; }
   .tree-icon-schema { color: #16a34a; }
