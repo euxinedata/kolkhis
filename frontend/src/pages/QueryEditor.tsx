@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { apiFetch, API_URL } from '../api'
+import { CatalogPanel } from '../components/CatalogPanel'
 
 interface QueryResult {
   columns: string[]
@@ -24,6 +25,7 @@ export function QueryEditor() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [catalogOpen, setCatalogOpen] = useState(true)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -114,79 +116,107 @@ export function QueryEditor() {
   const totalPages = result ? Math.ceil(result.total / result.page_size) : 0
 
   return (
-    <div>
-      <h2>Query Editor</h2>
-      <textarea
-        value={sql}
-        onChange={e => setSql(e.target.value)}
-        onKeyDown={e => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-            e.preventDefault()
-            handleSubmit()
-          }
-        }}
-        placeholder="SELECT * FROM namespace.table"
-        rows={6}
-        style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace' }}
-      />
-      <div style={{ display: 'flex', gap: '1em', marginTop: '0.5em', alignItems: 'center' }}>
-        <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
-          {submitting ? 'Submitting...' : 'Run Query'}
-        </button>
-        {status && (
-          <span className={`status-${status}`}>
-            {status}
-          </span>
-        )}
-        {jobId && status === 'completed' && (
-          <a
-            href={`${API_URL}/api/queries/${jobId}/export`}
-            style={{ fontSize: '0.85em' }}
-          >
-            Download CSV
-          </a>
-        )}
-      </div>
-
-      {error && (
-        <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em' }}>
-          {error}
-        </pre>
+    <div className="query-layout">
+      {catalogOpen && (
+        <aside className="catalog-sidebar">
+          <div className="catalog-sidebar-header">
+            <span className="catalog-sidebar-title">Catalog</span>
+            <button
+              className="catalog-toggle"
+              onClick={() => setCatalogOpen(false)}
+              title="Hide catalog"
+            >
+              ✕
+            </button>
+          </div>
+          <CatalogPanel />
+        </aside>
       )}
+      <div className="query-main">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75em', marginBottom: '0.5em' }}>
+          {!catalogOpen && (
+            <button
+              className="catalog-toggle"
+              onClick={() => setCatalogOpen(true)}
+              title="Show catalog"
+            >
+              ☰
+            </button>
+          )}
+          <h2 style={{ margin: 0 }}>Query Editor</h2>
+        </div>
+        <textarea
+          value={sql}
+          onChange={e => setSql(e.target.value)}
+          onKeyDown={e => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              e.preventDefault()
+              handleSubmit()
+            }
+          }}
+          placeholder="SELECT * FROM database.schema.table"
+          rows={6}
+          style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace' }}
+        />
+        <div style={{ display: 'flex', gap: '1em', marginTop: '0.5em', alignItems: 'center' }}>
+          <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
+            {submitting ? 'Submitting...' : 'Run Query'}
+          </button>
+          {status && (
+            <span className={`status-${status}`}>
+              {status}
+            </span>
+          )}
+          {jobId && status === 'completed' && (
+            <a
+              href={`${API_URL}/api/queries/${jobId}/export`}
+              style={{ fontSize: '0.85em' }}
+            >
+              Download CSV
+            </a>
+          )}
+        </div>
 
-      {result && (
-        <>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  {result.columns.map(col => (
-                    <th key={col}>{col}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {result.rows.map((row, i) => (
-                  <tr key={i}>
+        {error && (
+          <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em' }}>
+            {error}
+          </pre>
+        )}
+
+        {result && (
+          <>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
                     {result.columns.map(col => (
-                      <td key={col}>{String(row[col] ?? '')}</td>
+                      <th key={col}>{col}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="pagination">
-            <button disabled={result.page === 0} onClick={() => handlePage(result.page - 1)}>
-              Prev
-            </button>
-            <span>Page {result.page + 1} of {totalPages} ({result.total} rows)</span>
-            <button disabled={result.page + 1 >= totalPages} onClick={() => handlePage(result.page + 1)}>
-              Next
-            </button>
-          </div>
-        </>
-      )}
+                </thead>
+                <tbody>
+                  {result.rows.map((row, i) => (
+                    <tr key={i}>
+                      {result.columns.map(col => (
+                        <td key={col}>{String(row[col] ?? '')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="pagination">
+              <button disabled={result.page === 0} onClick={() => handlePage(result.page - 1)}>
+                Prev
+              </button>
+              <span>Page {result.page + 1} of {totalPages} ({result.total} rows)</span>
+              <button disabled={result.page + 1 >= totalPages} onClick={() => handlePage(result.page + 1)}>
+                Next
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

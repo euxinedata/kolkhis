@@ -76,9 +76,140 @@
 .app-main {
   flex: 1;
   padding: 1.5em;
-  max-width: 1200px;
   width: 100%;
-  margin: 0 auto;
+}
+
+/* Query layout: sidebar + editor */
+.query-layout {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 5em);
+}
+
+.catalog-sidebar {
+  width: 280px;
+  min-width: 280px;
+  border-right: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.catalog-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.catalog-sidebar-title {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: #8888bb;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.catalog-toggle {
+  background: none;
+  border: none;
+  color: #8888bb;
+  font-size: 0.85em;
+  padding: 0.2em 0.4em;
+  cursor: pointer;
+  line-height: 1;
+}
+.catalog-toggle:hover {
+  color: rgba(255, 255, 255, 0.87);
+  background: none;
+  border: none;
+}
+
+.catalog-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5em 0;
+}
+
+.query-main {
+  flex: 1;
+  min-width: 0;
+  padding: 0 0 0 1.5em;
+  overflow-y: auto;
+}
+
+/* Catalog tree */
+.catalog-tree {
+  font-size: 0.82em;
+  font-family: monospace;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.75em;
+  cursor: pointer;
+  color: #ccc;
+  white-space: nowrap;
+}
+.tree-node:hover {
+  background-color: #1e1e3a;
+}
+
+.tree-selected {
+  background-color: #2a2a4a;
+  color: #646cff;
+}
+
+.tree-arrow {
+  width: 0.8em;
+  color: #666;
+  font-size: 0.8em;
+  flex-shrink: 0;
+}
+
+.tree-database {
+  font-weight: 600;
+}
+
+.tree-type-badge {
+  font-size: 0.7em;
+  font-weight: 700;
+  color: #8888bb;
+  width: 1.2em;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.tree-columns {
+  padding: 0.2em 0 0.3em 2.8em;
+}
+
+.tree-column {
+  display: flex;
+  gap: 0.75em;
+  padding: 0.1em 0;
+  font-size: 0.9em;
+}
+
+.tree-col-name {
+  color: #ccc;
+}
+
+.tree-col-type {
+  color: #666;
+}
+
+.tree-view-sql {
+  background: #16162a;
+  padding: 0.4em 0.6em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  overflow: auto;
+  margin-bottom: 0.3em;
+  color: #aaa;
 }
 
 /* Status badges */
@@ -112,5 +243,30 @@
   }
   .nav-links a:hover {
     color: #213547;
+  }
+  .catalog-sidebar {
+    border-right-color: #e0e0ea;
+  }
+  .catalog-sidebar-header {
+    border-bottom-color: #e0e0ea;
+  }
+  .tree-node {
+    color: #333;
+  }
+  .tree-node:hover {
+    background-color: #eeeef5;
+  }
+  .tree-selected {
+    background-color: #e0e0f0;
+  }
+  .tree-col-name {
+    color: #333;
+  }
+  .tree-col-type {
+    color: #888;
+  }
+  .tree-view-sql {
+    background: #f5f5fa;
+    color: #555;
   }
 }
