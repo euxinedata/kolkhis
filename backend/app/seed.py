@@ -49,18 +49,41 @@ async def seed_catalog(session: AsyncSession) -> None:
     for ns_tuple in catalog.list_namespaces():
         ns_name = ns_tuple[0]
 
-        # Create a schema for each Iceberg namespace (if not "public")
-        if ns_name == "public":
+        # Parse namespace: "db__schema" → (db, schema) or plain → (kolkhis, ns)
+        if "__" in ns_name:
+            target_db_name, target_schema_name = ns_name.split("__", 1)
+        else:
+            target_db_name = "kolkhis"
+            target_schema_name = ns_name
+
+        # Resolve target database
+        if target_db_name == "kolkhis":
+            target_db = db
+        else:
+            result = await session.execute(
+                select(Database).where(Database.name == target_db_name)
+            )
+            target_db = result.scalar()
+            if target_db is None:
+                target_db = Database(name=target_db_name)
+                session.add(target_db)
+                await session.flush()
+
+        # Resolve target schema
+        if target_db_name == "kolkhis" and target_schema_name == "public":
             schema_obj = public_schema
         else:
             result = await session.execute(
                 select(Schema).where(
-                    Schema.database_id == db.id, Schema.name == ns_name
+                    Schema.database_id == target_db.id,
+                    Schema.name == target_schema_name,
                 )
             )
             schema_obj = result.scalar()
             if schema_obj is None:
-                schema_obj = Schema(database_id=db.id, name=ns_name)
+                schema_obj = Schema(
+                    database_id=target_db.id, name=target_schema_name
+                )
                 session.add(schema_obj)
                 await session.flush()
 
