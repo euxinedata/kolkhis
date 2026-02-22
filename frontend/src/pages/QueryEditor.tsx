@@ -30,7 +30,7 @@ function formatElapsed(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-export function QueryEditor() {
+export function QueryEditor({ theme }: { theme: string }) {
   const [sql, setSql] = useState(() => localStorage.getItem('kolkhis_sql') ?? '')
   const [jobId, setJobId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -43,8 +43,6 @@ export function QueryEditor() {
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const submitRef = useRef<() => void>(() => {})
-
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -209,7 +207,7 @@ export function QueryEditor() {
             <Editor
               height="100%"
               language="sql"
-              theme={prefersDark ? 'vs-dark' : 'vs'}
+              theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               value={sql}
               onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
               onMount={handleEditorMount}
