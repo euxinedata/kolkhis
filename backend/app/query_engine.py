@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import shutil
 from datetime import datetime
 
 import duckdb
@@ -216,7 +217,10 @@ def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
 
 def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     """Run a SQL query via DuckDB against registered catalog objects. Returns row count."""
+    temp_dir = os.path.join(RESULTS_PATH, f".tmp_{job_id}")
+    os.makedirs(temp_dir, exist_ok=True)
     conn = duckdb.connect()
+    conn.execute(f"SET temp_directory='{temp_dir}'")
     _running_conns[job_id] = conn
     try:
         conn.install_extension("iceberg")
@@ -269,6 +273,7 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     finally:
         _running_conns.pop(job_id, None)
         conn.close()
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 async def _update_job(job_id: str, **kwargs):
@@ -329,6 +334,9 @@ async def execute_query(job_id: str, sql: str):
             error=str(e)[:2048],
             completed_at=datetime.utcnow(),
         )
+    finally:
+        temp_dir = os.path.join(RESULTS_PATH, f".tmp_{job_id}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 async def cancel_query(job_id: str) -> bool:
