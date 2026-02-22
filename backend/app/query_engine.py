@@ -215,6 +215,40 @@ def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
     return sql
 
 
+def _find_referenced_objects(sql: str, catalog_objects: list[dict]) -> list[dict]:
+    """Return only catalog objects whose names appear in the SQL.
+
+    Checks both three-part (db.schema.name) and two-part (schema.name) forms,
+    case-insensitively. For any referenced view, recursively includes objects
+    referenced in that view's view_sql.
+    """
+    sql_upper = sql.upper()
+    referenced = []
+    for obj in catalog_objects:
+        three_part = f"{obj['database']}.{obj['schema']}.{obj['name']}".upper()
+        two_part = f"{obj['schema']}.{obj['name']}".upper()
+        if three_part in sql_upper or two_part in sql_upper:
+            referenced.append(obj)
+    # Recursively include objects referenced by views
+    seen = {(o["database"], o["schema"], o["name"]) for o in referenced}
+    queue = [o for o in referenced if o["object_type"] == "view" and o["view_sql"]]
+    while queue:
+        view = queue.pop()
+        view_upper = view["view_sql"].upper()
+        for obj in catalog_objects:
+            key = (obj["database"], obj["schema"], obj["name"])
+            if key in seen:
+                continue
+            three_part = f"{obj['database']}.{obj['schema']}.{obj['name']}".upper()
+            two_part = f"{obj['schema']}.{obj['name']}".upper()
+            if three_part in view_upper or two_part in view_upper:
+                seen.add(key)
+                referenced.append(obj)
+                if obj["object_type"] == "view" and obj["view_sql"]:
+                    queue.append(obj)
+    return referenced
+
+
 def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     """Run a SQL query via DuckDB against registered catalog objects. Returns row count."""
     temp_dir = os.path.join(RESULTS_PATH, f".tmp_{job_id}")
@@ -226,9 +260,10 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
         conn.install_extension("iceberg")
         conn.load_extension("iceberg")
 
-        # Register objects from metadata layer (tables first so views can reference them)
+        # Only register objects actually referenced in the SQL
+        referenced_objects = _find_referenced_objects(sql, catalog_objects)
         created_schemas: set[str] = set()
-        sorted_objects = sorted(catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
+        sorted_objects = sorted(referenced_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
         for obj in sorted_objects:
             duckdb_schema = f"{obj['database']}__{obj['schema']}"
 
