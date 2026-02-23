@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH
+from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, is_s3_warehouse
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
 from app.seed import seed_catalog, seed_countries
@@ -21,7 +21,8 @@ from app.routers.queries import router as queries_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(RESULTS_PATH, exist_ok=True)
-    os.makedirs(WAREHOUSE_PATH, exist_ok=True)
+    if not is_s3_warehouse():
+        os.makedirs(WAREHOUSE_PATH, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with async_session() as session:

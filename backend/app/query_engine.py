@@ -9,7 +9,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy import delete, select, update
 
-from app.config import MAX_RESULT_ROWS, RESULTS_PATH, WAREHOUSE_PATH
+from app.config import (
+    MAX_RESULT_ROWS,
+    RESULTS_PATH,
+    S3_ACCESS_KEY,
+    S3_ENDPOINT,
+    S3_REGION,
+    S3_SECRET_KEY,
+    WAREHOUSE_PATH,
+    is_s3_warehouse,
+)
 from app.database import async_session
 from app.models import CatalogObject, Database, QueryJob, Schema
 from app.warehouse import catalog
@@ -259,6 +268,22 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     try:
         conn.install_extension("iceberg")
         conn.load_extension("iceberg")
+
+        if is_s3_warehouse():
+            conn.install_extension("httpfs")
+            conn.load_extension("httpfs")
+            use_ssl = "true" if S3_ENDPOINT.startswith("https://") else "false"
+            conn.execute(f"""
+                CREATE SECRET (
+                    TYPE S3,
+                    KEY_ID '{S3_ACCESS_KEY}',
+                    SECRET '{S3_SECRET_KEY}',
+                    REGION '{S3_REGION}',
+                    ENDPOINT '{S3_ENDPOINT.replace("http://", "").replace("https://", "")}',
+                    URL_STYLE 'path',
+                    USE_SSL {use_ssl}
+                )
+            """)
 
         # Only register objects actually referenced in the SQL
         referenced_objects = _find_referenced_objects(sql, catalog_objects)
