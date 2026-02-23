@@ -8,6 +8,7 @@ Usage:
     python scripts/generate_retail_data.py          # also works
 """
 
+import io
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -17,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.parquet as pq
 from faker import Faker
 
 from app.warehouse import catalog
@@ -26,7 +28,9 @@ from app.warehouse import catalog
 # ---------------------------------------------------------------------------
 
 SEED = 42
-CHUNK_SIZE = 2_000_000
+CHUNK_SIZE = 2_000_000                       # rows per generation chunk
+TARGET_DISK_SIZE = 512 * 1024 * 1024         # 512 MB Parquet files on disk
+BIN_PACKER_BYPASS = 10 * 1024 * 1024 * 1024  # 10 GB — prevents bin-packer from splitting
 
 # Namespace mapping: database__schema
 NAMESPACES = {
@@ -149,6 +153,13 @@ def elapsed(start: float) -> str:
     return f"{time.time() - start:.1f}s"
 
 
+def calibrate_parquet_bytes_per_row(sample: pa.Table) -> float:
+    """Write a sample to an in-memory buffer to measure actual Parquet bytes/row."""
+    buf = io.BytesIO()
+    pq.write_table(sample, buf, compression='zstd')
+    return len(buf.getvalue()) / sample.num_rows
+
+
 def ensure_namespace(ns: str):
     existing = {t[0] for t in catalog.list_namespaces()}
     if ns not in existing:
@@ -163,7 +174,8 @@ def create_table(ns: str, name: str, schema: pa.Schema):
         print(f"  Table {full} already exists, dropping")
         catalog.drop_table(full)
     print(f"  Creating {full}")
-    return catalog.create_table(full, schema=schema)
+    props = {"write.target-file-size-bytes": str(BIN_PACKER_BYPASS)}
+    return catalog.create_table(full, schema=schema, properties=props)
 
 
 def random_dates(start: date, end: date, n: int) -> pa.Array:
@@ -560,22 +572,99 @@ def gen_payments_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 
 
 def write_chunked(ns: str, table_name: str, total: int, gen_fn, schema: pa.Schema):
-    """Generate and write a large table in chunks."""
-    iceberg_table = create_table(ns, table_name, schema)
+    """Generate and write a large table, targeting ~512 MB Parquet files on disk."""
     t0 = time.time()
+
+    # 1. Generate first chunk and calibrate compression
+    first_chunk = gen_fn(0, CHUNK_SIZE)
+    generated = first_chunk.num_rows
+    bytes_per_row = calibrate_parquet_bytes_per_row(first_chunk)
+    target_rows = int(TARGET_DISK_SIZE / bytes_per_row)
+    est_mem_mb = int(target_rows * first_chunk.nbytes / first_chunk.num_rows / 1024 / 1024)
+    print(f"    Calibration: {bytes_per_row:.1f} disk bytes/row, "
+          f"target {target_rows:,} rows/file, ~{est_mem_mb} MB memory/flush")
+
+    # 2. Create Iceberg table (bin-packer bypass ensures one file per append)
+    iceberg_table = create_table(ns, table_name, schema)
+
+    # 3. Accumulate and flush loop
     written = 0
-    chunk_num = 0
-    total_chunks = (total + CHUNK_SIZE - 1) // CHUNK_SIZE
-    report_interval = max(1, total_chunks // 20)  # report ~20 times
-    while written < total:
-        chunk = gen_fn(written, CHUNK_SIZE)
-        iceberg_table.append(chunk)
-        written += chunk.num_rows
-        chunk_num += 1
-        if chunk_num % report_interval == 0 or written >= total:
-            pct = written * 100 // total
-            print(f"    {pct:3d}% — {written:>14,}/{total:,} rows ({elapsed(t0)})")
+    pending: list[pa.Table] = [first_chunk]
+    pending_rows = first_chunk.num_rows
+    calibrated = False
+
+    while True:
+        # Generate more chunks until we have enough for a file (or exhaust total)
+        while pending_rows < target_rows and generated < total:
+            chunk = gen_fn(generated, CHUNK_SIZE)
+            generated += chunk.num_rows
+            pending.append(chunk)
+            pending_rows += chunk.num_rows
+
+        # Flush: concat, free pending list, then append
+        combined = pa.concat_tables(pending)
+        pending = []
+        pending_rows = 0
+        iceberg_table.append(combined)
+        written += combined.num_rows
+        del combined
+
+        # Refine calibration after first real write
+        if not calibrated:
+            files = iceberg_table.inspect.data_files().to_pylist()
+            if files:
+                actual_size = files[-1]["file_size_in_bytes"]
+                actual_rows = files[-1]["record_count"]
+                if actual_size > 0 and actual_rows > 0:
+                    bytes_per_row = actual_size / actual_rows
+                    target_rows = int(TARGET_DISK_SIZE / bytes_per_row)
+                    print(f"    Refined: {bytes_per_row:.1f} disk bytes/row, "
+                          f"target {target_rows:,} rows/file")
+                calibrated = True
+
+        pct = written * 100 // total
+        print(f"    {pct:3d}% — {written:>14,}/{total:,} rows ({elapsed(t0)})")
+
+        if generated >= total:
+            break
+
     print(f"  Done: {table_name} — {written:,} rows in {elapsed(t0)}")
+
+
+def verify_file_sizes():
+    """Log file sizes for all tables and warn if non-final files deviate from target."""
+    print(f"\n{'=' * 60}")
+    print("File size verification")
+    print(f"{'=' * 60}")
+    target_mb = TARGET_DISK_SIZE / 1024 / 1024
+    for ns in NAMESPACES.values():
+        try:
+            tables = catalog.list_tables(ns)
+        except Exception:
+            continue
+        for _, tbl_name in tables:
+            full = f"{ns}.{tbl_name}"
+            try:
+                tbl = catalog.load_table(full)
+                files = tbl.inspect.data_files().to_pylist()
+            except Exception:
+                continue
+            if not files:
+                continue
+            sizes = [f["file_size_in_bytes"] for f in files]
+            avg_mb = sum(sizes) / len(sizes) / 1024 / 1024
+            min_mb = min(sizes) / 1024 / 1024
+            max_mb = max(sizes) / 1024 / 1024
+            print(f"\n  {full}: {len(sizes)} file(s), "
+                  f"avg {avg_mb:.1f} MB, min {min_mb:.1f} MB, max {max_mb:.1f} MB")
+            # Warn if any non-final file is outside 80-120% of target
+            if len(sizes) > 1:
+                non_final = sorted(sizes, reverse=True)[:-1]  # exclude smallest (likely last)
+                for i, s in enumerate(non_final):
+                    s_mb = s / 1024 / 1024
+                    if s_mb < target_mb * 0.8 or s_mb > target_mb * 1.2:
+                        print(f"    WARNING: file {i} is {s_mb:.1f} MB "
+                              f"(outside 80-120% of {target_mb:.0f} MB target)")
 
 
 # ---------------------------------------------------------------------------
@@ -716,6 +805,8 @@ def main():
     write_chunked(ns, "payments", N_PAYMENTS, gen_payments_chunk, sample.schema)
 
     # -----------------------------------------------------------------------
+    verify_file_sizes()
+
     print(f"\n{'=' * 60}")
     print(f"All done in {elapsed(t_start)}")
     print(f"{'=' * 60}")
