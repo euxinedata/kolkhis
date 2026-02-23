@@ -2,6 +2,7 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
+import kolkhisLogo from './assets/kolkhis.svg'
 import './App.css'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
   if (!user) {
     return (
       <div className="login-screen">
+        <img src={kolkhisLogo} alt="Kolkhis" className="login-logo" />
         <h1>Kolkhis</h1>
         <p className="login-subtitle">Data Warehouse</p>
         <button onClick={login}>Sign in with Google</button>
@@ -24,7 +26,10 @@ function App() {
   return (
     <div className="app">
       <nav className="app-nav">
-        <span className="app-title">Kolkhis</span>
+        <span className="app-title">
+          <img src={kolkhisLogo} alt="" className="nav-logo" />
+          Kolkhis
+        </span>
         <div className="nav-links">
           <NavLink to="/" end>Query</NavLink>
           <NavLink to="/history">History</NavLink>

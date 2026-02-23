@@ -35,5 +35,17 @@ DATABASE_URL_PLAIN = (
 
 WAREHOUSE_PATH = os.environ.get("WAREHOUSE_PATH", "/mnt/warehouse")
 RESULTS_PATH = os.environ.get("RESULTS_PATH", "/tmp/warehouse-results")
+
+# S3-compatible object storage (used when WAREHOUSE_PATH starts with "s3://")
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://localhost:9000")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "minioadmin")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "minioadmin")
+S3_REGION = os.environ.get("S3_REGION", "us-east-1")
+
+
+def is_s3_warehouse() -> bool:
+    return WAREHOUSE_PATH.startswith("s3://")
+
+
 MAX_RESULT_ROWS = int(os.environ.get("MAX_RESULT_ROWS", "100000"))
 RESULTS_PAGE_SIZE = int(os.environ.get("RESULTS_PAGE_SIZE", "100"))
