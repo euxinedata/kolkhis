@@ -186,20 +186,20 @@ async def _load_catalog_objects() -> list[dict]:
 
 
 def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
-    """Rewrite database.schema.table references to database__schema.table for DuckDB.
+    """Rewrite database.schema.table references to "database.schema"."table" for DuckDB.
 
     DuckDB only supports two-level identifiers (schema.table). We rewrite any
     three-part name that matches a known catalog object so users can write
-    natural SQL like: SELECT * FROM kolkhis.nyc.yellow_trips
+    natural SQL like: SELECT * FROM retail_catalog.products.categories
     """
     # Build a map of (db, schema, name) -> duckdb reference
     replacements: list[tuple[str, str]] = []
     for obj in catalog_objects:
         # Match db.schema.name (with optional quoting)
         db, schema, name = obj["database"], obj["schema"], obj["name"]
-        # Three-part: db.schema.name -> db__schema.name
+        # Three-part: db.schema.name -> "db.schema"."name"
         three_part = f"{db}.{schema}.{name}"
-        duckdb_ref = f'"{db}__{schema}"."{name}"'
+        duckdb_ref = f'"{db}.{schema}"."{name}"'
         replacements.append((three_part, duckdb_ref))
 
     # Two-part rewrites for unambiguous schema names
@@ -211,7 +211,7 @@ def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
         schema, name, db = obj["schema"], obj["name"], obj["database"]
         if len(schema_db_map[schema]) == 1:
             two_part = f"{schema}.{name}"
-            duckdb_ref = f'"{db}__{schema}"."{name}"'
+            duckdb_ref = f'"{db}.{schema}"."{name}"'
             replacements.append((two_part, duckdb_ref))
 
     # Sort longest first to avoid partial matches
@@ -290,7 +290,7 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
         created_schemas: set[str] = set()
         sorted_objects = sorted(referenced_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
         for obj in sorted_objects:
-            duckdb_schema = f"{obj['database']}__{obj['schema']}"
+            duckdb_schema = f"{obj['database']}.{obj['schema']}"
 
             if duckdb_schema not in created_schemas:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{duckdb_schema}"')
