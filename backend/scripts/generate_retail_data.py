@@ -21,6 +21,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from faker import Faker
 
+from app.config import WAREHOUSE_PATH
 from app.warehouse import catalog
 
 # ---------------------------------------------------------------------------
@@ -32,14 +33,14 @@ CHUNK_SIZE = 2_000_000                       # rows per generation chunk
 TARGET_DISK_SIZE = 512 * 1024 * 1024         # 512 MB Parquet files on disk
 BIN_PACKER_BYPASS = 10 * 1024 * 1024 * 1024  # 10 GB — prevents bin-packer from splitting
 
-# Namespace mapping: database__schema
+# Namespace mapping: database.schema (hierarchical Iceberg namespaces)
 NAMESPACES = {
-    "retail_catalog__products": "retail_catalog__products",
-    "retail_catalog__pricing": "retail_catalog__pricing",
-    "retail_ops__stores": "retail_ops__stores",
-    "retail_ops__inventory": "retail_ops__inventory",
-    "retail_sales__transactions": "retail_sales__transactions",
-    "retail_sales__customers": "retail_sales__customers",
+    "retail_catalog.products": "retail_catalog.products",
+    "retail_catalog.pricing": "retail_catalog.pricing",
+    "retail_ops.stores": "retail_ops.stores",
+    "retail_ops.inventory": "retail_ops.inventory",
+    "retail_sales.transactions": "retail_sales.transactions",
+    "retail_sales.customers": "retail_sales.customers",
 }
 
 # Row counts
@@ -161,15 +162,15 @@ def calibrate_parquet_bytes_per_row(sample: pa.Table) -> float:
 
 
 def ensure_namespace(ns: str):
-    existing = {t[0] for t in catalog.list_namespaces()}
+    existing = {".".join(t) for t in catalog.list_namespaces()}
     if ns not in existing:
-        catalog.create_namespace(ns)
+        catalog.create_namespace(ns, properties={"location": f"{WAREHOUSE_PATH}/{ns.replace('.', '/')}"})
         print(f"  Created namespace {ns}")
 
 
 def create_table(ns: str, name: str, schema: pa.Schema):
     full = f"{ns}.{name}"
-    existing = {t[1] for t in catalog.list_tables(ns)}
+    existing = {t[-1] for t in catalog.list_tables(ns)}
     if name in existing:
         print(f"  Table {full} already exists, dropping")
         catalog.drop_table(full)
@@ -642,7 +643,8 @@ def verify_file_sizes():
             tables = catalog.list_tables(ns)
         except Exception:
             continue
-        for _, tbl_name in tables:
+        for tbl_id in tables:
+            tbl_name = tbl_id[-1]
             full = f"{ns}.{tbl_name}"
             try:
                 tbl = catalog.load_table(full)
@@ -686,7 +688,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_catalog.products
     # -----------------------------------------------------------------------
-    ns = "retail_catalog__products"
+    ns = "retail_catalog.products"
     print(f"\n--- {ns} ---")
 
     t = time.time()
@@ -716,7 +718,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_catalog.pricing
     # -----------------------------------------------------------------------
-    ns = "retail_catalog__pricing"
+    ns = "retail_catalog.pricing"
     print(f"\n--- {ns} ---")
 
     t = time.time()
@@ -740,7 +742,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_ops.stores
     # -----------------------------------------------------------------------
-    ns = "retail_ops__stores"
+    ns = "retail_ops.stores"
     print(f"\n--- {ns} ---")
 
     t = time.time()
@@ -764,7 +766,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_ops.inventory (chunked — large tables)
     # -----------------------------------------------------------------------
-    ns = "retail_ops__inventory"
+    ns = "retail_ops.inventory"
     print(f"\n--- {ns} ---")
 
     # Get schema from a small sample
@@ -779,7 +781,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_sales.customers
     # -----------------------------------------------------------------------
-    ns = "retail_sales__customers"
+    ns = "retail_sales.customers"
     print(f"\n--- {ns} ---")
 
     sample = gen_customers_chunk(0, 1)
@@ -791,7 +793,7 @@ def main():
     # -----------------------------------------------------------------------
     # retail_sales.transactions (chunked — very large tables)
     # -----------------------------------------------------------------------
-    ns = "retail_sales__transactions"
+    ns = "retail_sales.transactions"
     print(f"\n--- {ns} ---")
 
     sample = gen_orders_chunk(0, 1)

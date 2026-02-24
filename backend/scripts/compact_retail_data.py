@@ -25,12 +25,12 @@ TARGET_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
 MEMORY_THRESHOLD_BYTES = 2 * 1024 * 1024 * 1024
 
 RETAIL_NAMESPACES = [
-    "retail_catalog__products",
-    "retail_catalog__pricing",
-    "retail_ops__stores",
-    "retail_ops__inventory",
-    "retail_sales__customers",
-    "retail_sales__transactions",
+    "retail_catalog.products",
+    "retail_catalog.pricing",
+    "retail_ops.stores",
+    "retail_ops.inventory",
+    "retail_sales.customers",
+    "retail_sales.transactions",
 ]
 
 
@@ -163,9 +163,9 @@ def main():
         print(f"\n--- {ns} ---")
         for t in tables:
             # Skip temp tables from interrupted compactions
-            if t[1].endswith("__compacting"):
+            if t[-1].endswith("__compacting"):
                 continue
-            compact_table(ns, t[1])
+            compact_table(ns, t[-1])
 
     print(f"\n{'=' * 60}")
     print(f"All done in {elapsed(t_start)}")

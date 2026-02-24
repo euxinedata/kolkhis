@@ -45,13 +45,21 @@ async def seed_catalog(session: AsyncSession) -> None:
         session.add(public_schema)
         await session.flush()
 
-    # Scan Iceberg namespaces and register tables
-    for ns_tuple in catalog.list_namespaces():
-        ns_name = ns_tuple[0]
+    # Scan Iceberg namespaces (recursively enumerate nested namespaces)
+    all_namespaces = []
+    for top_ns in catalog.list_namespaces():
+        children = catalog.list_namespaces(top_ns)
+        if children:
+            all_namespaces.extend(children)
+        else:
+            all_namespaces.append(top_ns)
 
-        # Parse namespace: "db__schema" → (db, schema) or plain → (kolkhis, ns)
-        if "__" in ns_name:
-            target_db_name, target_schema_name = ns_name.split("__", 1)
+    for ns_tuple in all_namespaces:
+        ns_name = ".".join(ns_tuple)
+
+        # Parse namespace: "db.schema" → (db, schema) or plain → (kolkhis, ns)
+        if "." in ns_name:
+            target_db_name, target_schema_name = ns_name.split(".", 1)
         else:
             target_db_name = "kolkhis"
             target_schema_name = ns_name
@@ -89,7 +97,7 @@ async def seed_catalog(session: AsyncSession) -> None:
 
         # Register tables
         for tbl_tuple in catalog.list_tables(ns_name):
-            tbl_name = tbl_tuple[1]
+            tbl_name = tbl_tuple[-1]
             iceberg_id = f"{ns_name}.{tbl_name}"
 
             result = await session.execute(

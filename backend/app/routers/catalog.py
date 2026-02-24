@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
+from app.config import WAREHOUSE_PATH
 from app.database import get_db
 from app.models import CatalogObject, Database, Schema
 from app.warehouse import catalog
@@ -205,14 +206,14 @@ async def create_table(
             )
         fields.append(pa.field(col.name, pa_type, nullable=not col.required))
 
-    # Use iceberg namespace = db__schema
-    iceberg_ns = f"{db_name}__{schema_name}"
+    # Use iceberg namespace = db.schema (hierarchical)
+    iceberg_ns = f"{db_name}.{schema_name}"
     iceberg_id = f"{iceberg_ns}.{table_name}"
 
     # Ensure Iceberg namespace exists
-    existing_ns = [ns[0] for ns in catalog.list_namespaces()]
+    existing_ns = [".".join(ns) for ns in catalog.list_namespaces()]
     if iceberg_ns not in existing_ns:
-        catalog.create_namespace(iceberg_ns)
+        catalog.create_namespace(iceberg_ns, properties={"location": f"{WAREHOUSE_PATH}/{db_name}/{schema_name}"})
 
     pa_schema = pa.schema(fields)
     catalog.create_table(iceberg_id, schema=pa_schema)
