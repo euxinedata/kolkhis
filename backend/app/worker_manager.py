@@ -9,7 +9,7 @@ from hcloud.networks import Network
 from hcloud.server_types import ServerType
 from hcloud.locations import Location
 from hcloud.ssh_keys import SSHKey
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 
 from app.config import (
     HCLOUD_TOKEN,
@@ -162,7 +162,10 @@ async def idle_reaper():
                 result = await session.execute(
                     select(WorkerVM).where(
                         WorkerVM.status == "ready",
-                        WorkerVM.last_query_at < cutoff,
+                        or_(
+                            WorkerVM.last_query_at < cutoff,
+                            WorkerVM.created_at < cutoff,  # never used
+                        ),
                     )
                 )
                 idle_vms = result.scalars().all()
