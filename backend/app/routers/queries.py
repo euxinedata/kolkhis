@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import require_auth
 from app.config import (
     RESULTS_PAGE_SIZE,
-    S3_ACCESS_KEY,
-    S3_ENDPOINT,
-    S3_REGION,
+    S3_RESULTS_ACCESS_KEY,
     S3_RESULTS_BUCKET,
-    S3_SECRET_KEY,
+    S3_RESULTS_ENDPOINT,
+    S3_RESULTS_REGION,
+    S3_RESULTS_SECRET_KEY,
     WORKER_MODE,
 )
 from app.database import get_db
@@ -32,12 +32,12 @@ def _read_result_table(job_id: str):
     if WORKER_MODE == "remote":
         from pyarrow.fs import S3FileSystem
 
-        endpoint = S3_ENDPOINT.replace("http://", "").replace("https://", "")
-        use_ssl = S3_ENDPOINT.startswith("https://")
+        endpoint = S3_RESULTS_ENDPOINT.replace("http://", "").replace("https://", "")
+        use_ssl = S3_RESULTS_ENDPOINT.startswith("https://")
         fs = S3FileSystem(
-            access_key=S3_ACCESS_KEY,
-            secret_key=S3_SECRET_KEY,
-            region=S3_REGION,
+            access_key=S3_RESULTS_ACCESS_KEY,
+            secret_key=S3_RESULTS_SECRET_KEY,
+            region=S3_RESULTS_REGION,
             endpoint_override=endpoint,
             scheme="https" if use_ssl else "http",
         )

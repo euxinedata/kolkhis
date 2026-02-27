@@ -14,12 +14,12 @@ variable "hcloud_token" {
 
 variable "location" {
   type    = string
-  default = "fsn1"
+  default = "nbg1"
 }
 
 variable "server_type" {
   type    = string
-  default = "cpx11"
+  default = "cpx22"
 }
 
 variable "snapshot_name" {
@@ -51,10 +51,18 @@ source "hcloud" "worker" {
 build {
   sources = ["source.hcloud.worker"]
 
+  # Create target directories
+  provisioner "shell" {
+    inline = [
+      "mkdir -p /opt/kolkhis-worker",
+      "mkdir -p /etc/kolkhis-worker",
+    ]
+  }
+
   # Upload worker service source
   provisioner "file" {
     source      = "../worker/"
-    destination = "/opt/kolkhis-worker/"
+    destination = "/opt/kolkhis-worker"
   }
 
   # Upload systemd service file

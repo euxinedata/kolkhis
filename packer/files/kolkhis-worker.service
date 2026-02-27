@@ -16,9 +16,9 @@ RestartSec=5
 # Hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/tmp
+ReadWritePaths=/tmp /opt/kolkhis-worker
 PrivateTmp=yes
+Environment=HOME=/opt/kolkhis-worker
 
 [Install]
 WantedBy=multi-user.target

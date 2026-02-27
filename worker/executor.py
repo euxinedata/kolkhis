@@ -4,7 +4,6 @@ import shutil
 import tempfile
 
 import duckdb
-import pyarrow.parquet as pq
 
 
 # Module-level dict for cancellation support: job_id -> duckdb.DuckDBPyConnection
@@ -35,6 +34,7 @@ def execute_query(
 
     conn = duckdb.connect()
     conn.execute(f"SET temp_directory='{temp_dir}'")
+    conn.execute("SET home_directory='/opt/kolkhis-worker'")
     _running_conns[job_id] = conn
 
     try:
@@ -87,11 +87,10 @@ def execute_query(
         ):
             sql = f"{sql} LIMIT {max_result_rows}"
 
-        result = conn.execute(sql)
-        arrow_table = result.fetch_arrow_table()
-        row_count = arrow_table.num_rows
-
-        pq.write_table(arrow_table, result_path)
+        # Write results using DuckDB's COPY so it uses the configured S3 secret
+        conn.execute(f"CREATE TEMP TABLE _results AS {sql}")
+        row_count = conn.execute("SELECT count(*) FROM _results").fetchone()[0]
+        conn.execute(f"COPY _results TO '{result_path}' (FORMAT PARQUET)")
 
         return row_count
     finally:

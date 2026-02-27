@@ -8,7 +8,8 @@ from hcloud.images import Image
 from hcloud.networks import Network
 from hcloud.server_types import ServerType
 from hcloud.locations import Location
-from sqlalchemy import select, update
+from hcloud.ssh_keys import SSHKey
+from sqlalchemy import delete, select, update
 
 from app.config import (
     HCLOUD_TOKEN,
@@ -67,8 +68,20 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         if vm is not None:
             return vm
 
+    # Remove any old destroyed/destroying rows for this user
+    async with async_session() as session:
+        await session.execute(
+            delete(WorkerVM).where(
+                WorkerVM.user_id == user_id,
+                WorkerVM.status.in_(["destroyed", "destroying"]),
+            )
+        )
+        await session.commit()
+
     # Provision a new VM
     client = _get_hcloud()
+    # Attach all SSH keys from the Hetzner account for debug access
+    ssh_keys = await asyncio.to_thread(client.ssh_keys.get_all)
     response = await asyncio.to_thread(
         client.servers.create,
         name=f"worker-{user_id}",
@@ -76,10 +89,12 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         image=Image(id=int(WORKER_SNAPSHOT_ID)),
         location=Location(name=WORKER_LOCATION),
         networks=[Network(id=WORKER_NETWORK_ID)],
+        ssh_keys=ssh_keys,
         user_data=_cloud_init_user_data(),
     )
     server = response.server
-    private_ip = server.private_net[0].ip if server.private_net else server.public_net.ipv4.ip
+    # Use public IP for local dev; in production (on private network) use private_net
+    private_ip = server.public_net.ipv4.ip
 
     vm = WorkerVM(
         user_id=user_id,

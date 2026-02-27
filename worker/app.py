@@ -4,6 +4,8 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+import duckdb
+
 from config import WORKER_AUTH_TOKEN
 from executor import cancel, execute_query
 
@@ -102,6 +104,8 @@ async def submit_query(req: QueryRequest, _auth: Authenticated):
             row_count = await fut
             _jobs[job_id]["status"] = "completed"
             _jobs[job_id]["row_count"] = row_count
+        except duckdb.InterruptException:
+            _jobs[job_id]["status"] = "cancelled"
         except Exception as exc:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(exc)

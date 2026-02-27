@@ -15,7 +15,11 @@ from app.config import (
     S3_ACCESS_KEY,
     S3_ENDPOINT,
     S3_REGION,
+    S3_RESULTS_ACCESS_KEY,
     S3_RESULTS_BUCKET,
+    S3_RESULTS_ENDPOINT,
+    S3_RESULTS_REGION,
+    S3_RESULTS_SECRET_KEY,
     S3_SECRET_KEY,
     WAREHOUSE_PATH,
     WORKER_AUTH_TOKEN,
@@ -28,6 +32,7 @@ from app.warehouse import catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
 _running_conns: dict[str, duckdb.DuckDBPyConnection] = {}
+_remote_workers: dict[str, str] = {}  # job_id -> worker IP
 
 _CREATE_VIEW_RE = re.compile(
     r"^\s*CREATE\s+(?:(OR\s+REPLACE)\s+)?VIEW\s+"
@@ -395,36 +400,40 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
         "sql": rewritten_sql,
         "catalog_objects": resolved_objects,
         "s3": {
-            "endpoint": S3_ENDPOINT,
-            "access_key": S3_ACCESS_KEY,
-            "secret_key": S3_SECRET_KEY,
-            "region": S3_REGION,
+            "endpoint": S3_RESULTS_ENDPOINT,
+            "access_key": S3_RESULTS_ACCESS_KEY,
+            "secret_key": S3_RESULTS_SECRET_KEY,
+            "region": S3_RESULTS_REGION,
             "result_path": result_path,
         },
         "max_result_rows": MAX_RESULT_ROWS,
     }
     headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
+    _remote_workers[job_id] = vm.private_ip
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"http://{vm.private_ip}:8080/query",
-            json=payload,
-            headers=headers,
-        )
-        resp.raise_for_status()
-
-    # Poll worker until done
-    async with httpx.AsyncClient(timeout=30) as client:
-        while True:
-            await asyncio.sleep(2)
-            resp = await client.get(
-                f"http://{vm.private_ip}:8080/query/{job_id}",
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"http://{vm.private_ip}:8080/query",
+                json=payload,
                 headers=headers,
             )
             resp.raise_for_status()
-            data = resp.json()
-            if data["status"] != "running":
-                break
+
+        # Poll worker until done
+        async with httpx.AsyncClient(timeout=30) as client:
+            while True:
+                await asyncio.sleep(2)
+                resp = await client.get(
+                    f"http://{vm.private_ip}:8080/query/{job_id}",
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data["status"] != "running":
+                    break
+    finally:
+        _remote_workers.pop(job_id, None)
 
     # Update WorkerVM.last_query_at
     async with async_session() as session:
@@ -435,6 +444,8 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
         )
         await session.commit()
 
+    if data["status"] == "cancelled":
+        raise asyncio.CancelledError()
     if data["status"] == "failed":
         raise RuntimeError(data.get("error", "Remote query failed"))
 
@@ -509,10 +520,27 @@ async def cancel_query(job_id: str) -> bool:
     task = _running_tasks.get(job_id)
     if task is None:
         return False
-    # Interrupt the DuckDB connection so the thread stops immediately
+
+    # For remote workers, send cancel to the worker first
+    worker_ip = _remote_workers.get(job_id)
+    if worker_ip:
+        import httpx
+
+        headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"http://{worker_ip}:8080/query/{job_id}/cancel",
+                    headers=headers,
+                )
+        except Exception:
+            pass  # Best effort — task.cancel() below will stop the polling loop
+
+    # Interrupt the local DuckDB connection (for local mode)
     conn = _running_conns.get(job_id)
     if conn is not None:
         conn.interrupt()
+
     task.cancel()
     return True
 
