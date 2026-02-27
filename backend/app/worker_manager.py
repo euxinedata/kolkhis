@@ -127,7 +127,7 @@ async def wait_for_ready(vm_id: int, timeout: float = 300, interval: float = 5):
                         )
                         await session.commit()
                     return
-            except (httpx.ConnectError, httpx.ReadTimeout):
+            except httpx.TransportError:
                 pass
             await asyncio.sleep(interval)
 

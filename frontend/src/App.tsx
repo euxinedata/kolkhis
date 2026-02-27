@@ -2,6 +2,7 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
+import Resources from './pages/Resources.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
 import './App.css'
 
@@ -32,6 +33,7 @@ function App() {
         </span>
         <div className="nav-links">
           <NavLink to="/" end>Query</NavLink>
+          <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/history">History</NavLink>
         </div>
         <div className="nav-user">
@@ -42,6 +44,7 @@ function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<QueryEditor />} />
+          <Route path="/resources" element={<Resources />} />
           <Route path="/history" element={<QueryHistory />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

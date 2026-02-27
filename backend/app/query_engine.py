@@ -414,12 +414,19 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"http://{vm.private_ip}:8080/query",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
+            for attempt in range(3):
+                try:
+                    resp = await client.post(
+                        f"http://{vm.private_ip}:8080/query",
+                        json=payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    break
+                except httpx.TransportError:
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(5)
             await _update_job(job_id, status="running")
 
         # Poll worker until done
