@@ -381,9 +381,9 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
     rewritten_sql = _rewrite_three_part_names(sql, catalog_objects)
 
     # Ensure worker VM is ready
+    await _update_job(job_id, status="provisioning")
     vm = await ensure_worker(user_id)
     if vm.status == "provisioning":
-        await _update_job(job_id, status="provisioning")
         await wait_for_ready(vm.id)
         # Refresh VM to get updated status
         async with async_session() as session:
@@ -391,7 +391,6 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
                 select(WorkerVM).where(WorkerVM.id == vm.id)
             )
             vm = result.scalar_one()
-        await _update_job(job_id, status="running")
 
     # Build S3 config for worker
     result_path = f"s3://{S3_RESULTS_BUCKET}/results/{job_id}.parquet"
@@ -421,6 +420,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
                 headers=headers,
             )
             resp.raise_for_status()
+            await _update_job(job_id, status="running")
 
         # Poll worker until done
         async with httpx.AsyncClient(timeout=30) as client:
@@ -457,13 +457,14 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
 
 async def _execute_local(job_id: str, sql: str):
     """Execute a query locally via DuckDB (existing behavior)."""
+    await _update_job(job_id, status="running")
     catalog_objects = await _load_catalog_objects()
     row_count = await asyncio.to_thread(_run_duckdb, sql, job_id, catalog_objects)
     return row_count
 
 
 async def execute_query(job_id: str, sql: str, user_id: int = 0):
-    await _update_job(job_id, status="running", started_at=datetime.utcnow())
+    await _update_job(job_id, started_at=datetime.utcnow())
     try:
         # Intercept CREATE VIEW DDL — persist in catalog, skip DuckDB
         match = _try_create_view(sql)
