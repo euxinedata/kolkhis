@@ -1,0 +1,24 @@
+[Unit]
+Description=Kolkhis Query Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kolkhis-worker
+Group=kolkhis-worker
+WorkingDirectory=/opt/kolkhis-worker
+EnvironmentFile=/etc/kolkhis-worker/env
+ExecStart=/opt/kolkhis-worker/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/tmp
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

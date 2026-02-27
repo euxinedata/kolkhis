@@ -11,6 +11,7 @@ dependencies = [
     "authlib>=1.6.8",
     "duckdb>=1.2.0",
     "fastapi>=0.129.0",
+    "hcloud>=2.4.0",
     "httpx>=0.28.1",
     "numpy>=2.0.0",
     "itsdangerous>=2.2.0",

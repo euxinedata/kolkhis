@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -9,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, is_s3_warehouse
+from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, WORKER_MODE, is_s3_warehouse
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
 from app.seed import seed_catalog, seed_countries
@@ -29,7 +30,20 @@ async def lifespan(app: FastAPI):
         await seed_countries(session)
     async with async_session() as session:
         await seed_catalog(session)
+
+    reaper_task = None
+    if WORKER_MODE == "remote":
+        from app.worker_manager import idle_reaper
+        reaper_task = asyncio.create_task(idle_reaper())
+
     yield
+
+    if reaper_task is not None:
+        reaper_task.cancel()
+        try:
+            await reaper_task
+        except asyncio.CancelledError:
+            pass
     await engine.dispose()
 
 

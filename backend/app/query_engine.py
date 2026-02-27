@@ -15,12 +15,15 @@ from app.config import (
     S3_ACCESS_KEY,
     S3_ENDPOINT,
     S3_REGION,
+    S3_RESULTS_BUCKET,
     S3_SECRET_KEY,
     WAREHOUSE_PATH,
+    WORKER_AUTH_TOKEN,
+    WORKER_MODE,
     is_s3_warehouse,
 )
 from app.database import async_session
-from app.models import CatalogObject, Database, QueryJob, Schema
+from app.models import CatalogObject, Database, QueryJob, Schema, WorkerVM
 from app.warehouse import catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -344,7 +347,109 @@ async def _update_job(job_id: str, **kwargs):
         await session.commit()
 
 
-async def execute_query(job_id: str, sql: str):
+async def _execute_remote(job_id: str, sql: str, user_id: int):
+    """Execute a query on a remote worker VM."""
+    import httpx
+
+    from app.worker_manager import ensure_worker, wait_for_ready
+
+    # Load catalog and find referenced objects
+    catalog_objects = await _load_catalog_objects()
+    referenced = _find_referenced_objects(sql, catalog_objects)
+
+    # Resolve metadata locations for referenced tables
+    resolved_objects = []
+    for obj in referenced:
+        entry = {
+            "duckdb_schema": f"{obj['database']}.{obj['schema']}",
+            "name": obj["name"],
+            "object_type": obj["object_type"],
+        }
+        if obj["object_type"] == "table" and obj["iceberg_identifier"]:
+            tbl = await asyncio.to_thread(catalog.load_table, obj["iceberg_identifier"])
+            entry["metadata_location"] = tbl.metadata_location
+        elif obj["object_type"] == "view" and obj["view_sql"]:
+            entry["view_sql"] = obj["view_sql"]
+        resolved_objects.append(entry)
+
+    # Rewrite SQL
+    rewritten_sql = _rewrite_three_part_names(sql, catalog_objects)
+
+    # Ensure worker VM is ready
+    vm = await ensure_worker(user_id)
+    if vm.status == "provisioning":
+        await wait_for_ready(vm.id)
+        # Refresh VM to get updated status
+        async with async_session() as session:
+            result = await session.execute(
+                select(WorkerVM).where(WorkerVM.id == vm.id)
+            )
+            vm = result.scalar_one()
+
+    # Build S3 config for worker
+    result_path = f"s3://{S3_RESULTS_BUCKET}/results/{job_id}.parquet"
+
+    # POST query to worker
+    payload = {
+        "job_id": job_id,
+        "sql": rewritten_sql,
+        "catalog_objects": resolved_objects,
+        "s3": {
+            "endpoint": S3_ENDPOINT,
+            "access_key": S3_ACCESS_KEY,
+            "secret_key": S3_SECRET_KEY,
+            "region": S3_REGION,
+            "result_path": result_path,
+        },
+        "max_result_rows": MAX_RESULT_ROWS,
+    }
+    headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"http://{vm.private_ip}:8080/query",
+            json=payload,
+            headers=headers,
+        )
+        resp.raise_for_status()
+
+    # Poll worker until done
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            await asyncio.sleep(2)
+            resp = await client.get(
+                f"http://{vm.private_ip}:8080/query/{job_id}",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data["status"] != "running":
+                break
+
+    # Update WorkerVM.last_query_at
+    async with async_session() as session:
+        await session.execute(
+            update(WorkerVM).where(WorkerVM.id == vm.id).values(
+                last_query_at=datetime.utcnow()
+            )
+        )
+        await session.commit()
+
+    if data["status"] == "failed":
+        raise RuntimeError(data.get("error", "Remote query failed"))
+
+    row_count = data.get("row_count", 0)
+    return row_count
+
+
+async def _execute_local(job_id: str, sql: str):
+    """Execute a query locally via DuckDB (existing behavior)."""
+    catalog_objects = await _load_catalog_objects()
+    row_count = await asyncio.to_thread(_run_duckdb, sql, job_id, catalog_objects)
+    return row_count
+
+
+async def execute_query(job_id: str, sql: str, user_id: int = 0):
     await _update_job(job_id, status="running", started_at=datetime.utcnow())
     try:
         # Intercept CREATE VIEW DDL — persist in catalog, skip DuckDB
@@ -373,10 +478,11 @@ async def execute_query(job_id: str, sql: str):
             )
             return
 
-        # Load catalog objects from metadata layer (async)
-        catalog_objects = await _load_catalog_objects()
-        # Run DuckDB in a thread (sync)
-        row_count = await asyncio.to_thread(_run_duckdb, sql, job_id, catalog_objects)
+        if WORKER_MODE == "remote":
+            row_count = await _execute_remote(job_id, sql, user_id)
+        else:
+            row_count = await _execute_local(job_id, sql)
+
         await _update_job(
             job_id,
             status="completed",
@@ -411,8 +517,8 @@ async def cancel_query(job_id: str) -> bool:
     return True
 
 
-def submit_query(job_id: str, sql: str):
-    task = asyncio.create_task(execute_query(job_id, sql))
+def submit_query(job_id: str, sql: str, user_id: int = 0):
+    task = asyncio.create_task(execute_query(job_id, sql, user_id))
     _running_tasks[job_id] = task
 
     def _on_done(_t):
