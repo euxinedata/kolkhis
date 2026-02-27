@@ -383,6 +383,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
     # Ensure worker VM is ready
     vm = await ensure_worker(user_id)
     if vm.status == "provisioning":
+        await _update_job(job_id, status="provisioning")
         await wait_for_ready(vm.id)
         # Refresh VM to get updated status
         async with async_session() as session:
@@ -390,6 +391,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
                 select(WorkerVM).where(WorkerVM.id == vm.id)
             )
             vm = result.scalar_one()
+        await _update_job(job_id, status="running")
 
     # Build S3 config for worker
     result_path = f"s3://{S3_RESULTS_BUCKET}/results/{job_id}.parquet"

@@ -66,7 +66,7 @@ export function QueryEditor() {
 
   // Tick elapsed time while query is active
   useEffect(() => {
-    if (!(status === 'pending' || status === 'running') || !startedAt) {
+    if (!(status === 'pending' || status === 'provisioning' || status === 'running') || !startedAt) {
       return
     }
     const tick = () => setElapsed(formatElapsed(Date.now() - parseUTC(startedAt)))
@@ -83,7 +83,7 @@ export function QueryEditor() {
       if (job.started_at) setStartedAt(job.started_at)
       if (job.status === 'completed') {
         await fetchResults(id, 0)
-      } else if (job.status === 'pending' || job.status === 'running') {
+      } else if (job.status === 'pending' || job.status === 'provisioning' || job.status === 'running') {
         startPolling(id)
       }
     } catch (e: unknown) {
@@ -224,7 +224,7 @@ export function QueryEditor() {
             />
           </div>
           <div style={{ display: 'flex', gap: '1em', padding: '1em 0', alignItems: 'center', flexShrink: 0 }}>
-            {status === 'pending' || status === 'running' ? (
+            {status === 'pending' || status === 'provisioning' || status === 'running' ? (
               <button onClick={handleCancel}>Cancel</button>
             ) : (
               <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
@@ -233,7 +233,7 @@ export function QueryEditor() {
             )}
             {status && (
               <span className={`status-${status}`}>
-                {status}{elapsed && (status === 'pending' || status === 'running') ? `  ${elapsed}` : ''}
+                {status}{elapsed && (status === 'pending' || status === 'provisioning' || status === 'running') ? `  ${elapsed}` : ''}
               </span>
             )}
             {jobId && status === 'completed' && (
