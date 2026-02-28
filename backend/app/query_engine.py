@@ -412,6 +412,15 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
     headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
     _remote_workers[job_id] = vm.private_ip
 
+    # Mark VM as recently active so the idle reaper won't destroy it mid-query
+    async with async_session() as session:
+        await session.execute(
+            update(WorkerVM).where(WorkerVM.id == vm.id).values(
+                last_query_at=datetime.utcnow()
+            )
+        )
+        await session.commit()
+
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             for attempt in range(3):
@@ -430,6 +439,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
             await _update_job(job_id, status="running")
 
         # Poll worker until done
+        poll_count = 0
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
                 await asyncio.sleep(2)
@@ -441,6 +451,16 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
                 data = resp.json()
                 if data["status"] != "running":
                     break
+                # Refresh last_query_at every ~60s to keep reaper away
+                poll_count += 1
+                if poll_count % 30 == 0:
+                    async with async_session() as session:
+                        await session.execute(
+                            update(WorkerVM).where(WorkerVM.id == vm.id).values(
+                                last_query_at=datetime.utcnow()
+                            )
+                        )
+                        await session.commit()
     finally:
         _remote_workers.pop(job_id, None)
 
