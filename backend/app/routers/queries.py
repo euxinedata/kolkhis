@@ -9,12 +9,42 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import RESULTS_PAGE_SIZE
+from app.config import (
+    RESULTS_PAGE_SIZE,
+    S3_RESULTS_ACCESS_KEY,
+    S3_RESULTS_BUCKET,
+    S3_RESULTS_ENDPOINT,
+    S3_RESULTS_REGION,
+    S3_RESULTS_SECRET_KEY,
+    WORKER_MODE,
+)
 from app.database import get_db
 from app.models import QueryJob
 from app.query_engine import _result_path, cancel_query, submit_query
 
 router = APIRouter(prefix="/api/queries")
+
+
+def _read_result_table(job_id: str):
+    """Read a result Parquet table from local filesystem or S3."""
+    import pyarrow.parquet as pq
+
+    if WORKER_MODE == "remote":
+        from pyarrow.fs import S3FileSystem
+
+        endpoint = S3_RESULTS_ENDPOINT.replace("http://", "").replace("https://", "")
+        use_ssl = S3_RESULTS_ENDPOINT.startswith("https://")
+        fs = S3FileSystem(
+            access_key=S3_RESULTS_ACCESS_KEY,
+            secret_key=S3_RESULTS_SECRET_KEY,
+            region=S3_RESULTS_REGION,
+            endpoint_override=endpoint,
+            scheme="https" if use_ssl else "http",
+        )
+        path = f"{S3_RESULTS_BUCKET}/results/{job_id}.parquet"
+        return pq.read_table(path, filesystem=fs)
+    else:
+        return pq.read_table(_result_path(job_id))
 
 
 class SubmitQuery(BaseModel):
@@ -31,7 +61,7 @@ async def create_query(
     job = QueryJob(id=job_id, user_id=int(user["sub"]), sql=body.sql, status="pending")
     db.add(job)
     await db.commit()
-    submit_query(job_id, body.sql)
+    submit_query(job_id, body.sql, user_id=int(user["sub"]))
     return {"job_id": job_id}
 
 
@@ -134,10 +164,7 @@ async def get_results(
     if job.status != "completed":
         raise HTTPException(status_code=400, detail=f"Query status: {job.status}")
 
-    import pyarrow.parquet as pq
-
-    path = _result_path(job_id)
-    table = pq.read_table(path)
+    table = _read_result_table(job_id)
     total = table.num_rows
     start = page * RESULTS_PAGE_SIZE
     end = min(start + RESULTS_PAGE_SIZE, total)
@@ -176,10 +203,7 @@ async def export_csv(
     if job.status != "completed":
         raise HTTPException(status_code=400, detail=f"Query status: {job.status}")
 
-    import pyarrow.parquet as pq
-
-    path = _result_path(job_id)
-    table = pq.read_table(path)
+    table = _read_result_table(job_id)
     columns = [field.name for field in table.schema]
     rows = table.to_pydict()
 

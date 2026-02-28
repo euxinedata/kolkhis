@@ -49,3 +49,19 @@ def is_s3_warehouse() -> bool:
 
 MAX_RESULT_ROWS = int(os.environ.get("MAX_RESULT_ROWS", "100000"))
 RESULTS_PAGE_SIZE = int(os.environ.get("RESULTS_PAGE_SIZE", "100"))
+
+# Worker VM configuration
+WORKER_MODE = os.environ.get("WORKER_MODE", "local")  # "local" or "remote"
+WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN", "")
+WORKER_SNAPSHOT_ID = os.environ.get("WORKER_SNAPSHOT_ID", "")
+WORKER_SERVER_TYPE = os.environ.get("WORKER_SERVER_TYPE", "cpx21")
+WORKER_LOCATION = os.environ.get("WORKER_LOCATION", "fsn1")
+WORKER_NETWORK_ID = int(os.environ.get("WORKER_NETWORK_ID", "0"))
+HCLOUD_TOKEN = os.environ.get("HCLOUD_TOKEN", "")
+WORKER_IDLE_TIMEOUT = int(os.environ.get("WORKER_IDLE_TIMEOUT", "300"))  # 5 min
+S3_RESULTS_BUCKET = os.environ.get("S3_RESULTS_BUCKET", "")
+# Separate S3 config for results (defaults to warehouse S3 if not set)
+S3_RESULTS_ENDPOINT = os.environ.get("S3_RESULTS_ENDPOINT", S3_ENDPOINT)
+S3_RESULTS_ACCESS_KEY = os.environ.get("S3_RESULTS_ACCESS_KEY", S3_ACCESS_KEY)
+S3_RESULTS_SECRET_KEY = os.environ.get("S3_RESULTS_SECRET_KEY", S3_SECRET_KEY)
+S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)

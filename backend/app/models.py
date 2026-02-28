@@ -81,3 +81,15 @@ class CatalogObject(Base):
     iceberg_identifier: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     view_sql: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class WorkerVM(Base):
+    __tablename__ = "worker_vms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, unique=True)
+    hetzner_server_id: Mapped[int] = mapped_column(Integer)
+    private_ip: Mapped[str] = mapped_column(String(45))
+    status: Mapped[str] = mapped_column(String(20))  # provisioning, ready, destroying, destroyed
+    last_query_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

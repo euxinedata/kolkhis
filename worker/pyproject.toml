@@ -1,0 +1,15 @@
+[project]
+name = "kolkhis-worker"
+version = "0.1.0"
+description = "Kolkhis DuckDB query worker service"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "duckdb>=1.2",
+    "pyarrow>=19",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
