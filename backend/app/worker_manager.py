@@ -21,6 +21,7 @@ from app.config import (
     WORKER_AUTH_TOKEN,
     WORKER_IDLE_TIMEOUT,
     WORKER_LOCATION,
+    WORKER_MODE,
     WORKER_NETWORK_ID,
     WORKER_SERVER_TYPE,
     WORKER_SNAPSHOT_ID,
@@ -93,8 +94,12 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         user_data=_cloud_init_user_data(),
     )
     server = response.server
-    # Use public IP for local dev; in production (on private network) use private_net
-    private_ip = server.public_net.ipv4.ip
+    if WORKER_MODE == "remote":
+        # Re-fetch to get private_net populated
+        server = await asyncio.to_thread(client.servers.get_by_id, server.id)
+        private_ip = server.private_net[0].ip
+    else:
+        private_ip = server.public_net.ipv4.ip
 
     vm = WorkerVM(
         user_id=user_id,
