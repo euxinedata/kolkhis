@@ -169,7 +169,8 @@ async def idle_reaper():
                         WorkerVM.status == "ready",
                         or_(
                             WorkerVM.last_query_at < cutoff,
-                            WorkerVM.created_at < cutoff,  # never used
+                            # Only use created_at for VMs that never ran a query
+                            WorkerVM.last_query_at.is_(None) & (WorkerVM.created_at < cutoff),
                         ),
                     )
                 )
