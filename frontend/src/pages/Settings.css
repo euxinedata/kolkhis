@@ -1,0 +1,63 @@
+.settings-page {
+  max-width: 500px;
+}
+
+.settings-section {
+  margin-top: 1.5em;
+}
+
+.settings-label {
+  font-size: 0.9em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.settings-hint {
+  font-size: 0.8em;
+  color: #8888bb;
+  margin: 0.3em 0 1em;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+
+.settings-input {
+  width: 80px;
+  padding: 0.4em 0.6em;
+  font-size: 0.9em;
+  background: #16162a;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.settings-success {
+  color: #4ade80;
+  font-size: 0.85em;
+  margin-top: 0.75em;
+}
+
+.settings-error {
+  color: #f87171;
+  font-size: 0.85em;
+  margin-top: 0.75em;
+}
+
+@media (prefers-color-scheme: light) {
+  .settings-input {
+    background: #f5f5fa;
+    border-color: #e0e0ea;
+    color: #213547;
+  }
+  .settings-label {
+    color: #213547;
+  }
+}

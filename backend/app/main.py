@@ -17,6 +17,7 @@ from app.seed import seed_catalog, seed_countries
 from app.auth import router as auth_router, verify_token
 from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
+from app.routers.settings import router as settings_router
 from app.routers.workers import router as workers_router
 
 
@@ -62,6 +63,7 @@ app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 app.include_router(auth_router)
 app.include_router(catalog_router)
 app.include_router(queries_router)
+app.include_router(settings_router)
 app.include_router(workers_router)
 
 
