@@ -1,4 +1,6 @@
+import math
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,15 +105,17 @@ async def compute_billing_summary(
     total_cost_cents = 0
     for st, seconds in sorted(type_seconds.items()):
         rate = rates.get(st)
-        hourly_rate = rate.hourly_rate_cents if rate else 0
+        hourly_rate_eur = rate.hourly_rate_eur if rate else Decimal("0")
         display_name = rate.display_name if rate else st
-        cost_cents = int(seconds * hourly_rate / 3600)
+        # Exact cost in EUR, then round up to next cent
+        cost_eur = Decimal(seconds) * hourly_rate_eur / Decimal(3600)
+        cost_cents = math.ceil(cost_eur * 100)
         line_items.append({
             "server_type": st,
             "display_name": display_name,
             "seconds": seconds,
             "hours": round(seconds / 3600, 2),
-            "hourly_rate_cents": hourly_rate,
+            "hourly_rate_eur": str(hourly_rate_eur),
             "cost_cents": cost_cents,
         })
         total_seconds += seconds
