@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -102,4 +102,42 @@ class WorkerVM(Base):
     server_type: Mapped[str] = mapped_column(String(20), default="cpx42")
     status: Mapped[str] = mapped_column(String(20))  # provisioning, ready, destroying, destroyed
     last_query_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    destroyed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UsageEvent(Base):
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(30))  # compute_start, compute_stop, storage
+    server_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    worker_vm_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ServerTypeRate(Base):
+    __tablename__ = "server_type_rates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_type: Mapped[str] = mapped_column(String(20), unique=True)
+    hourly_rate_cents: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class BillingPeriod(Base):
+    __tablename__ = "billing_periods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime)
+    period_end: Mapped[datetime] = mapped_column(DateTime)
+    compute_seconds: Mapped[int] = mapped_column(Integer)
+    compute_cost_cents: Mapped[int] = mapped_column(Integer)
+    storage_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
+    total_cost_cents: Mapped[int] = mapped_column(Integer)
+    stripe_reported: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

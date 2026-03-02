@@ -4,7 +4,7 @@ import pycountry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CatalogObject, Country, Database, Schema
+from app.models import CatalogObject, Country, Database, Schema, ServerTypeRate
 from app.warehouse import catalog
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,34 @@ async def seed_countries(session: AsyncSession) -> None:
     ]
     session.add_all(countries)
     await session.commit()
+
+
+_SERVER_TYPE_RATES = [
+    {"server_type": "cpx42", "hourly_rate_cents": 4, "display_name": "XS Sparrow"},
+    {"server_type": "cpx62", "hourly_rate_cents": 7, "display_name": "S Dove"},
+    {"server_type": "ccx43", "hourly_rate_cents": 15, "display_name": "M Falcon"},
+    {"server_type": "ccx53", "hourly_rate_cents": 31, "display_name": "L Stork"},
+    {"server_type": "ccx63", "hourly_rate_cents": 46, "display_name": "XL Swan"},
+]
+
+
+async def seed_server_type_rates(session: AsyncSession) -> None:
+    result = await session.execute(select(ServerTypeRate))
+    existing = {r.server_type: r for r in result.scalars().all()}
+
+    changed = False
+    for rate in _SERVER_TYPE_RATES:
+        row = existing.get(rate["server_type"])
+        if row is None:
+            session.add(ServerTypeRate(**rate))
+            changed = True
+        elif row.display_name != rate["display_name"]:
+            row.display_name = rate["display_name"]
+            changed = True
+
+    if changed:
+        await session.commit()
+        logger.info("Updated server type rates")
 
 
 async def seed_catalog(session: AsyncSession) -> None:
