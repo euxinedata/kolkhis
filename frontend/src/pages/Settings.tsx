@@ -14,10 +14,11 @@ interface WorkerVM {
 }
 
 const WORKER_SIZES = [
-  { value: 'cpx42', label: 'XS', specs: '8 vCPU, 16 GB' },
-  { value: 'cpx62', label: 'S', specs: '16 vCPU, 32 GB' },
-  { value: 'ccx43', label: 'M', specs: '16 vCPU, 64 GB' },
-  { value: 'ccx53', label: 'L', specs: '32 vCPU, 128 GB' },
+  { value: 'cpx42', size: 'XS', bird: 'Sparrow', specs: '8 vCPU, 16 GB' },
+  { value: 'cpx62', size: 'S',  bird: 'Dove',    specs: '16 vCPU, 32 GB' },
+  { value: 'ccx43', size: 'M',  bird: 'Falcon',  specs: '16 vCPU, 64 GB' },
+  { value: 'ccx53', size: 'L',  bird: 'Stork',   specs: '32 vCPU, 128 GB' },
+  { value: 'ccx63', size: 'XL', bird: 'Swan',    specs: '48 vCPU, 192 GB' },
 ]
 
 export function Settings() {
@@ -119,7 +120,7 @@ export function Settings() {
           >
             {WORKER_SIZES.map(s => (
               <option key={s.value} value={s.value}>
-                {s.label} — {s.specs}
+                {`${s.size.padEnd(2)} ${s.bird.padEnd(7)} \u2014 ${s.specs}`}
               </option>
             ))}
           </select>

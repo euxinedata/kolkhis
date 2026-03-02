@@ -1,5 +1,6 @@
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth.tsx'
+import { Billing } from './pages/Billing.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
 import Resources from './pages/Resources.tsx'
@@ -36,6 +37,7 @@ function App() {
           <NavLink to="/" end>Query</NavLink>
           <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/history">History</NavLink>
+          <NavLink to="/billing">Billing</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </div>
         <div className="nav-user">
@@ -48,6 +50,7 @@ function App() {
           <Route path="/" element={<QueryEditor />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/history" element={<QueryHistory />} />
+          <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

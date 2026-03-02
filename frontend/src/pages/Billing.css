@@ -1,0 +1,94 @@
+.billing-page {
+  max-width: 700px;
+}
+
+.billing-period-label {
+  font-size: 0.85em;
+  color: #8888bb;
+  margin: 0.5em 0 1.5em;
+}
+
+.billing-total {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.87);
+  margin: 0 0 0.25em;
+}
+
+.billing-total-label {
+  font-size: 0.8em;
+  color: #8888bb;
+  margin: 0 0 1.5em;
+}
+
+.billing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+
+.billing-table th {
+  text-align: left;
+  color: #8888bb;
+  font-weight: 600;
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.billing-table td {
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid #1e1e3a;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.billing-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.billing-section {
+  margin-top: 2.5em;
+}
+
+.billing-section h3 {
+  font-size: 0.95em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.87);
+  margin: 0 0 0.75em;
+}
+
+.billing-history-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4em 0;
+  border-bottom: 1px solid #1e1e3a;
+  font-size: 0.85em;
+}
+
+.billing-history-period {
+  color: #8888bb;
+}
+
+.billing-history-cost {
+  color: rgba(255, 255, 255, 0.87);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-color-scheme: light) {
+  .billing-total {
+    color: #213547;
+  }
+  .billing-table th {
+    border-bottom-color: #e0e0ea;
+  }
+  .billing-table td {
+    color: #213547;
+    border-bottom-color: #f0f0f5;
+  }
+  .billing-history-row {
+    border-bottom-color: #f0f0f5;
+  }
+  .billing-history-cost {
+    color: #213547;
+  }
+}

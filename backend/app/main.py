@@ -13,8 +13,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, WORKER_MODE, is_s3_warehouse
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
-from app.seed import seed_catalog, seed_countries
+from app.seed import seed_catalog, seed_countries, seed_server_type_rates
 from app.auth import router as auth_router, verify_token
+from app.routers.billing import router as billing_router
 from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
 from app.routers.settings import router as settings_router
@@ -30,6 +31,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     async with async_session() as session:
         await seed_countries(session)
+    async with async_session() as session:
+        await seed_server_type_rates(session)
     async with async_session() as session:
         await seed_catalog(session)
 
@@ -62,6 +65,7 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.include_router(catalog_router)
 app.include_router(queries_router)
 app.include_router(settings_router)

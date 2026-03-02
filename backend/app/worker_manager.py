@@ -27,7 +27,7 @@ from app.config import (
     WORKER_SNAPSHOT_ID,
 )
 from app.database import async_session
-from app.models import UserSettings, WorkerVM
+from app.models import UsageEvent, UserSettings, WorkerVM
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +80,19 @@ async def cleanup_stale_workers():
         except Exception:
             logger.exception("Failed to delete Hetzner server %d", vm.hetzner_server_id)
 
+        now = datetime.utcnow()
         async with async_session() as session:
             await session.execute(
-                update(WorkerVM).where(WorkerVM.id == vm.id).values(status="destroyed")
+                update(WorkerVM).where(WorkerVM.id == vm.id).values(
+                    status="destroyed", destroyed_at=now,
+                )
             )
+            session.add(UsageEvent(
+                user_id=vm.user_id,
+                event_type="compute_stop",
+                server_type=vm.server_type,
+                worker_vm_id=vm.id,
+            ))
             await session.commit()
 
     logger.info("Cleaned up %d stale worker VM(s)", len(stale_vms))
@@ -153,6 +162,16 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         session.add(vm)
         await session.commit()
         await session.refresh(vm)
+
+    async with async_session() as session:
+        session.add(UsageEvent(
+            user_id=user_id,
+            event_type="compute_start",
+            server_type=server_type_name,
+            worker_vm_id=vm.id,
+        ))
+        await session.commit()
+
     return vm
 
 
@@ -192,10 +211,19 @@ async def destroy_worker(vm_id: int):
     if server is not None:
         await asyncio.to_thread(server.delete)
 
+    now = datetime.utcnow()
     async with async_session() as session:
         await session.execute(
-            update(WorkerVM).where(WorkerVM.id == vm_id).values(status="destroyed")
+            update(WorkerVM).where(WorkerVM.id == vm_id).values(
+                status="destroyed", destroyed_at=now,
+            )
         )
+        session.add(UsageEvent(
+            user_id=vm.user_id,
+            event_type="compute_stop",
+            server_type=vm.server_type,
+            worker_vm_id=vm.id,
+        ))
         await session.commit()
 
 

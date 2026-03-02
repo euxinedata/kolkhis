@@ -41,7 +41,8 @@
 
 .settings-select {
   padding: 0.4em 0.6em;
-  font-size: 0.9em;
+  font-size: 1em;
+  font-family: monospace;
   background: #16162a;
   border: 1px solid #2a2a4a;
   border-radius: 4px;
