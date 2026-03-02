@@ -24,6 +24,7 @@ from app.config import (
     WAREHOUSE_PATH,
     WORKER_AUTH_TOKEN,
     WORKER_MODE,
+    WORKER_URL,
     is_s3_warehouse,
 )
 from app.database import async_session
@@ -490,6 +491,75 @@ async def _execute_local(job_id: str, sql: str):
     return row_count
 
 
+async def _execute_local_worker(job_id: str, sql: str):
+    """Execute a query on a locally-running worker over HTTP."""
+    import httpx
+
+    catalog_objects = await _load_catalog_objects()
+    referenced = _find_referenced_objects(sql, catalog_objects)
+
+    resolved_objects = []
+    for obj in referenced:
+        entry = {
+            "duckdb_schema": f"{obj['database']}.{obj['schema']}",
+            "name": obj["name"],
+            "object_type": obj["object_type"],
+        }
+        if obj["object_type"] == "table" and obj["iceberg_identifier"]:
+            tbl = await asyncio.to_thread(catalog.load_table, obj["iceberg_identifier"])
+            entry["metadata_location"] = tbl.metadata_location
+        elif obj["object_type"] == "view" and obj["view_sql"]:
+            entry["view_sql"] = obj["view_sql"]
+        resolved_objects.append(entry)
+
+    rewritten_sql = _rewrite_three_part_names(sql, catalog_objects)
+    result_path = _result_path(job_id)
+
+    payload = {
+        "job_id": job_id,
+        "sql": rewritten_sql,
+        "catalog_objects": resolved_objects,
+        "s3": {
+            "endpoint": S3_ENDPOINT,
+            "access_key": S3_ACCESS_KEY,
+            "secret_key": S3_SECRET_KEY,
+            "region": S3_REGION,
+            "result_path": result_path,
+        },
+        "max_result_rows": MAX_RESULT_ROWS,
+    }
+    headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
+    _remote_workers[job_id] = WORKER_URL
+
+    try:
+        await _update_job(job_id, status="running")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{WORKER_URL}/query", json=payload, headers=headers,
+            )
+            resp.raise_for_status()
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            while True:
+                await asyncio.sleep(2)
+                resp = await client.get(
+                    f"{WORKER_URL}/query/{job_id}", headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data["status"] != "running":
+                    break
+    finally:
+        _remote_workers.pop(job_id, None)
+
+    if data["status"] == "cancelled":
+        raise asyncio.CancelledError()
+    if data["status"] == "failed":
+        raise RuntimeError(data.get("error", "Local worker query failed"))
+
+    return data.get("row_count", 0)
+
+
 async def execute_query(job_id: str, sql: str, user_id: int = 0):
     await _update_job(job_id, started_at=datetime.utcnow())
     try:
@@ -521,6 +591,8 @@ async def execute_query(job_id: str, sql: str, user_id: int = 0):
 
         if WORKER_MODE == "remote":
             row_count = await _execute_remote(job_id, sql, user_id)
+        elif WORKER_MODE == "local-worker":
+            row_count = await _execute_local_worker(job_id, sql)
         else:
             row_count = await _execute_local(job_id, sql)
 
@@ -551,18 +623,19 @@ async def cancel_query(job_id: str) -> bool:
     if task is None:
         return False
 
-    # For remote workers, send cancel to the worker first
-    worker_ip = _remote_workers.get(job_id)
-    if worker_ip:
+    # For remote/local workers, send cancel to the worker first
+    worker_addr = _remote_workers.get(job_id)
+    if worker_addr:
         import httpx
 
+        if worker_addr.startswith("http"):
+            cancel_url = f"{worker_addr}/query/{job_id}/cancel"
+        else:
+            cancel_url = f"http://{worker_addr}:8080/query/{job_id}/cancel"
         headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(
-                    f"http://{worker_ip}:8080/query/{job_id}/cancel",
-                    headers=headers,
-                )
+                await client.post(cancel_url, headers=headers)
         except Exception:
             pass  # Best effort — task.cancel() below will stop the polling loop
 

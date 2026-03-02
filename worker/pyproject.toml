@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn>=0.34",
     "duckdb>=1.2",
     "pyarrow>=19",
+    "python-dotenv>=1.0",
 ]
 
 [build-system]

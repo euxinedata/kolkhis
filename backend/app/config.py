@@ -51,7 +51,8 @@ MAX_RESULT_ROWS = int(os.environ.get("MAX_RESULT_ROWS", "100000"))
 RESULTS_PAGE_SIZE = int(os.environ.get("RESULTS_PAGE_SIZE", "100"))
 
 # Worker VM configuration
-WORKER_MODE = os.environ.get("WORKER_MODE", "local")  # "local" or "remote"
+WORKER_MODE = os.environ.get("WORKER_MODE", "local")  # "local", "local-worker", or "remote"
+WORKER_URL = os.environ.get("WORKER_URL", "http://localhost:8080")
 WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN", "")
 WORKER_SNAPSHOT_ID = os.environ.get("WORKER_SNAPSHOT_ID", "")
 WORKER_SERVER_TYPE = os.environ.get("WORKER_SERVER_TYPE", "cpx21")
