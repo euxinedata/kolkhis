@@ -7,7 +7,7 @@ interface LineItem {
   display_name: string
   seconds: number
   hours: number
-  hourly_rate_cents: number
+  hourly_rate_eur: string
   cost_cents: number
 }
 
@@ -88,7 +88,7 @@ export function Billing() {
               <tr key={item.server_type}>
                 <td>{item.display_name} ({item.server_type})</td>
                 <td className="num">{item.hours}</td>
-                <td className="num">€{centsToEur(item.hourly_rate_cents)}</td>
+                <td className="num">€{item.hourly_rate_eur}</td>
                 <td className="num">€{centsToEur(item.cost_cents)}</td>
               </tr>
             ))}

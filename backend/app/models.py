@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from decimal import Decimal
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -123,7 +125,7 @@ class ServerTypeRate(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     server_type: Mapped[str] = mapped_column(String(20), unique=True)
-    hourly_rate_cents: Mapped[int] = mapped_column(Integer)
+    hourly_rate_eur: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
