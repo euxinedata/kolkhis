@@ -49,6 +49,38 @@ function languageForPath(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// File type icons — maps extensions/filenames to SVGs in /file-icons/
+// ---------------------------------------------------------------------------
+const FILE_ICON_MAP: Record<string, string> = {
+  py: 'python',
+  sql: 'database',
+  yml: 'yaml',
+  yaml: 'yaml',
+  json: 'json',
+  md: 'markdown',
+  txt: 'document',
+  xml: 'xml',
+  csv: 'table',
+  toml: 'toml',
+}
+
+const FILENAME_ICON_MAP: Record<string, string> = {
+  '.gitignore': 'git',
+  '.gitkeep': 'git',
+}
+
+function fileIconUrl(filename: string): string {
+  const name = FILENAME_ICON_MAP[filename]
+    ?? FILE_ICON_MAP[filename.split('.').pop()?.toLowerCase() ?? '']
+    ?? 'file'
+  return `/file-icons/${name}.svg`
+}
+
+function folderIconUrl(isOpen: boolean): string {
+  return isOpen ? '/file-icons/folder-open.svg' : '/file-icons/folder.svg'
+}
+
+// ---------------------------------------------------------------------------
 // FileTreeDataProvider — wraps our API for react-complex-tree
 // ---------------------------------------------------------------------------
 class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
@@ -478,6 +510,17 @@ export function ProjectEditor() {
               onExpandItem={handleExpandItem}
               onRenameItem={handleRenameItem}
               onAbortRenamingItem={handleAbortRenaming}
+              renderItemTitle={({ title, item, context }) => {
+                const iconUrl = item.isFolder
+                  ? folderIconUrl(context.isExpanded ?? false)
+                  : fileIconUrl(item.data.name)
+                return (
+                  <span className="file-tree-title-with-icon">
+                    <img className="file-tree-icon" src={iconUrl} alt="" />
+                    {title}
+                  </span>
+                )
+              }}
             >
               <Tree<FileEntry>
                 ref={treeRef}

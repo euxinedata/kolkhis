@@ -153,6 +153,19 @@
   width: 2px;
 }
 
+/* File tree icons */
+.file-tree-title-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.file-tree-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 /* Editor panel */
 .file-editor-panel {
   flex: 1;
