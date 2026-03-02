@@ -112,6 +112,14 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         )
         await session.commit()
 
+    # Read user's preferred worker size
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        user_settings = result.scalar_one_or_none()
+    server_type_name = user_settings.worker_size if user_settings else WORKER_SERVER_TYPE
+
     # Provision a new VM
     client = _get_hcloud()
     # Attach all SSH keys from the Hetzner account for debug access
@@ -119,7 +127,7 @@ async def ensure_worker(user_id: int) -> WorkerVM:
     response = await asyncio.to_thread(
         client.servers.create,
         name=f"worker-{user_id}",
-        server_type=ServerType(name=WORKER_SERVER_TYPE),
+        server_type=ServerType(name=server_type_name),
         image=Image(id=int(WORKER_SNAPSHOT_ID)),
         location=Location(name=WORKER_LOCATION),
         networks=[Network(id=WORKER_NETWORK_ID)],
@@ -138,6 +146,7 @@ async def ensure_worker(user_id: int) -> WorkerVM:
         user_id=user_id,
         hetzner_server_id=server.id,
         private_ip=private_ip,
+        server_type=server_type_name,
         status="provisioning",
     )
     async with async_session() as session:

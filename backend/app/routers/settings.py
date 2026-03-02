@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/settings")
 
 class UpdateSettings(BaseModel):
     idle_timeout: int
+    worker_size: str | None = None
 
 
 @router.get("")
@@ -29,7 +30,7 @@ async def get_settings(
         db.add(settings)
         await db.commit()
         await db.refresh(settings)
-    return {"idle_timeout": settings.idle_timeout}
+    return {"idle_timeout": settings.idle_timeout, "worker_size": settings.worker_size}
 
 
 @router.put("")
@@ -45,9 +46,13 @@ async def update_settings(
     settings = result.scalar_one_or_none()
     if settings is None:
         settings = UserSettings(user_id=user_id, idle_timeout=body.idle_timeout)
+        if body.worker_size is not None:
+            settings.worker_size = body.worker_size
         db.add(settings)
     else:
         settings.idle_timeout = body.idle_timeout
+        if body.worker_size is not None:
+            settings.worker_size = body.worker_size
     await db.commit()
     await db.refresh(settings)
-    return {"idle_timeout": settings.idle_timeout}
+    return {"idle_timeout": settings.idle_timeout, "worker_size": settings.worker_size}
