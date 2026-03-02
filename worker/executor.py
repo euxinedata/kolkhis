@@ -34,7 +34,8 @@ def execute_query(
 
     conn = duckdb.connect()
     conn.execute(f"SET temp_directory='{temp_dir}'")
-    conn.execute("SET home_directory='/opt/kolkhis-worker'")
+    if os.path.isdir("/opt/kolkhis-worker"):
+        conn.execute("SET home_directory='/opt/kolkhis-worker'")
     _running_conns[job_id] = conn
 
     try:

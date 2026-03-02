@@ -1,5 +1,11 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load .env from project root (one level up from worker/)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
 
 WORKER_AUTH_TOKEN: str = os.environ["WORKER_AUTH_TOKEN"]
 S3_ENDPOINT: str = os.environ.get("S3_ENDPOINT", "")
