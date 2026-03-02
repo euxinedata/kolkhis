@@ -35,7 +35,8 @@ async def lifespan(app: FastAPI):
 
     reaper_task = None
     if WORKER_MODE == "remote":
-        from app.worker_manager import idle_reaper
+        from app.worker_manager import cleanup_stale_workers, idle_reaper
+        await cleanup_stale_workers()
         reaper_task = asyncio.create_task(idle_reaper())
 
     yield

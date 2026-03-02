@@ -56,6 +56,39 @@ runcmd:
 """
 
 
+async def cleanup_stale_workers():
+    """Destroy any worker VMs left in provisioning/ready state from a previous run."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(WorkerVM).where(WorkerVM.status.in_(["provisioning", "ready"]))
+        )
+        stale_vms = result.scalars().all()
+
+    if not stale_vms:
+        return
+
+    client = _get_hcloud()
+    for vm in stale_vms:
+        logger.info(
+            "Cleaning up stale worker VM %d (user %d, hetzner_server_id %d, status %s)",
+            vm.id, vm.user_id, vm.hetzner_server_id, vm.status,
+        )
+        try:
+            server = await asyncio.to_thread(client.servers.get_by_id, vm.hetzner_server_id)
+            if server is not None:
+                await asyncio.to_thread(server.delete)
+        except Exception:
+            logger.exception("Failed to delete Hetzner server %d", vm.hetzner_server_id)
+
+        async with async_session() as session:
+            await session.execute(
+                update(WorkerVM).where(WorkerVM.id == vm.id).values(status="destroyed")
+            )
+            await session.commit()
+
+    logger.info("Cleaned up %d stale worker VM(s)", len(stale_vms))
+
+
 async def ensure_worker(user_id: int) -> WorkerVM:
     """Return an existing ready/provisioning VM for the user, or provision a new one."""
     async with async_session() as session:
