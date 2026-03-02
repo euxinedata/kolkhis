@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, WORKER_MODE, is_s3_warehouse
+from app.config import (
+    JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, WORKER_MODE,
+    GITEA_ADMIN_PASSWORD, is_s3_warehouse,
+)
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
 from app.seed import seed_catalog, seed_countries, seed_server_type_rates
@@ -35,6 +39,13 @@ async def lifespan(app: FastAPI):
         await seed_server_type_rates(session)
     async with async_session() as session:
         await seed_catalog(session)
+
+    if GITEA_ADMIN_PASSWORD:
+        from app.gitea import bootstrap_token
+        try:
+            await bootstrap_token()
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Gitea bootstrap failed: %s", exc)
 
     reaper_task = None
     if WORKER_MODE == "remote":

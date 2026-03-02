@@ -66,3 +66,8 @@ S3_RESULTS_ENDPOINT = os.environ.get("S3_RESULTS_ENDPOINT", S3_ENDPOINT)
 S3_RESULTS_ACCESS_KEY = os.environ.get("S3_RESULTS_ACCESS_KEY", S3_ACCESS_KEY)
 S3_RESULTS_SECRET_KEY = os.environ.get("S3_RESULTS_SECRET_KEY", S3_SECRET_KEY)
 S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
+
+# Gitea configuration
+GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")
+GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
+GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
