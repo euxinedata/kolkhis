@@ -89,6 +89,7 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
     idle_timeout: Mapped[int] = mapped_column(Integer, default=900)  # seconds
+    worker_size: Mapped[str] = mapped_column(String(20), default="cpx42")
 
 
 class WorkerVM(Base):
@@ -98,6 +99,7 @@ class WorkerVM(Base):
     user_id: Mapped[int] = mapped_column(Integer, unique=True)
     hetzner_server_id: Mapped[int] = mapped_column(Integer)
     private_ip: Mapped[str] = mapped_column(String(45))
+    server_type: Mapped[str] = mapped_column(String(20), default="cpx42")
     status: Mapped[str] = mapped_column(String(20))  # provisioning, ready, destroying, destroyed
     last_query_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -3,7 +3,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import WORKER_SERVER_TYPE
 from app.database import get_db
 from app.models import WorkerVM
 from app.worker_manager import destroy_worker
@@ -28,7 +27,7 @@ async def list_workers(
         {
             "id": vm.id,
             "status": vm.status,
-            "server_type": WORKER_SERVER_TYPE,
+            "server_type": vm.server_type,
             "created_at": vm.created_at.isoformat() if vm.created_at else None,
             "last_query_at": vm.last_query_at.isoformat() if vm.last_query_at else None,
         }

@@ -39,6 +39,24 @@
   border-color: #646cff;
 }
 
+.settings-select {
+  padding: 0.4em 0.6em;
+  font-size: 0.9em;
+  background: #16162a;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.settings-select:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.settings-actions {
+  margin-top: 1.5em;
+}
+
 .settings-success {
   color: #4ade80;
   font-size: 0.85em;
@@ -51,13 +69,75 @@
   margin-top: 0.75em;
 }
 
+.settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-modal {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 1.5em;
+  max-width: 420px;
+  width: 90%;
+}
+
+.settings-modal-title {
+  font-weight: 600;
+  font-size: 0.95em;
+  margin: 0 0 0.5em;
+  color: rgba(255, 255, 255, 0.87);
+}
+
+.settings-modal-text {
+  font-size: 0.85em;
+  color: #8888bb;
+  margin: 0 0 1.2em;
+}
+
+.settings-modal-actions {
+  display: flex;
+  gap: 0.75em;
+}
+
+.settings-modal-actions button.secondary {
+  background: transparent;
+  border: 1px solid #2a2a4a;
+  color: rgba(255, 255, 255, 0.67);
+}
+
+.settings-modal-actions button.secondary:hover {
+  border-color: #646cff;
+}
+
 @media (prefers-color-scheme: light) {
-  .settings-input {
+  .settings-input,
+  .settings-select {
     background: #f5f5fa;
     border-color: #e0e0ea;
     color: #213547;
   }
   .settings-label {
     color: #213547;
+  }
+  .settings-modal {
+    background: #ffffff;
+    border-color: #e0e0ea;
+  }
+  .settings-modal-title {
+    color: #213547;
+  }
+  .settings-modal-text {
+    color: #666;
+  }
+  .settings-modal-actions button.secondary {
+    border-color: #e0e0ea;
+    color: #666;
   }
 }
