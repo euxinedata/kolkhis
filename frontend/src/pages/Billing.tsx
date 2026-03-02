@@ -33,6 +33,15 @@ function formatDate(iso: string): string {
   })
 }
 
+function formatDuration(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
 function formatMonth(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', {
     month: 'long',
@@ -78,7 +87,7 @@ export function Billing() {
           <thead>
             <tr>
               <th>Server type</th>
-              <th className="num">Hours</th>
+              <th className="num">Runtime</th>
               <th className="num">Rate (€/hr)</th>
               <th className="num">Subtotal</th>
             </tr>
@@ -87,7 +96,7 @@ export function Billing() {
             {current.line_items.map((item) => (
               <tr key={item.server_type}>
                 <td>{item.display_name} ({item.server_type})</td>
-                <td className="num">{item.hours}</td>
+                <td className="num">{formatDuration(item.seconds)}</td>
                 <td className="num">€{item.hourly_rate_eur}</td>
                 <td className="num">€{centsToEur(item.cost_cents)}</td>
               </tr>
