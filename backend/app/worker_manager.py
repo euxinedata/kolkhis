@@ -27,7 +27,7 @@ from app.config import (
     WORKER_SNAPSHOT_ID,
 )
 from app.database import async_session
-from app.models import WorkerVM
+from app.models import UserSettings, WorkerVM
 
 logger = logging.getLogger(__name__)
 
@@ -162,19 +162,33 @@ async def idle_reaper():
     while True:
         await asyncio.sleep(60)
         try:
-            cutoff = datetime.utcnow() - timedelta(seconds=WORKER_IDLE_TIMEOUT)
+            now = datetime.utcnow()
             async with async_session() as session:
                 result = await session.execute(
-                    select(WorkerVM).where(
-                        WorkerVM.status == "ready",
-                        or_(
-                            WorkerVM.last_query_at < cutoff,
-                            # Only use created_at for VMs that never ran a query
-                            WorkerVM.last_query_at.is_(None) & (WorkerVM.created_at < cutoff),
-                        ),
-                    )
+                    select(WorkerVM).where(WorkerVM.status == "ready")
                 )
-                idle_vms = result.scalars().all()
+                ready_vms = result.scalars().all()
+
+                # Build a map of user_id -> idle_timeout from UserSettings
+                if ready_vms:
+                    user_ids = [vm.user_id for vm in ready_vms]
+                    settings_result = await session.execute(
+                        select(UserSettings).where(UserSettings.user_id.in_(user_ids))
+                    )
+                    timeout_map = {
+                        s.user_id: s.idle_timeout
+                        for s in settings_result.scalars().all()
+                    }
+
+            idle_vms = []
+            for vm in ready_vms:
+                timeout = timeout_map.get(vm.user_id, WORKER_IDLE_TIMEOUT)
+                cutoff = now - timedelta(seconds=timeout)
+                if vm.last_query_at is not None:
+                    if vm.last_query_at < cutoff:
+                        idle_vms.append(vm)
+                elif vm.created_at < cutoff:
+                    idle_vms.append(vm)
 
             for vm in idle_vms:
                 logger.info("Reaping idle worker VM %d (user %d)", vm.id, vm.user_id)

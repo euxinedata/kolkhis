@@ -83,6 +83,14 @@ class CatalogObject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    idle_timeout: Mapped[int] = mapped_column(Integer, default=900)  # seconds
+
+
 class WorkerVM(Base):
     __tablename__ = "worker_vms"
 

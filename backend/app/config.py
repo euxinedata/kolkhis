@@ -58,7 +58,7 @@ WORKER_SERVER_TYPE = os.environ.get("WORKER_SERVER_TYPE", "cpx21")
 WORKER_LOCATION = os.environ.get("WORKER_LOCATION", "fsn1")
 WORKER_NETWORK_ID = int(os.environ.get("WORKER_NETWORK_ID", "0"))
 HCLOUD_TOKEN = os.environ.get("HCLOUD_TOKEN", "")
-WORKER_IDLE_TIMEOUT = int(os.environ.get("WORKER_IDLE_TIMEOUT", "300"))  # 5 min
+WORKER_IDLE_TIMEOUT = int(os.environ.get("WORKER_IDLE_TIMEOUT", "900"))  # 15 min
 S3_RESULTS_BUCKET = os.environ.get("S3_RESULTS_BUCKET", "")
 # Separate S3 config for results (defaults to warehouse S3 if not set)
 S3_RESULTS_ENDPOINT = os.environ.get("S3_RESULTS_ENDPOINT", S3_ENDPOINT)

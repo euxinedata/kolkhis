@@ -3,6 +3,7 @@ import { useAuth } from './auth.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
 import Resources from './pages/Resources.tsx'
+import { Settings } from './pages/Settings.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
 import './App.css'
 
@@ -35,6 +36,7 @@ function App() {
           <NavLink to="/" end>Query</NavLink>
           <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/history">History</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
         </div>
         <div className="nav-user">
           <span className="user-name">{user.name}</span>
@@ -46,6 +48,7 @@ function App() {
           <Route path="/" element={<QueryEditor />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/history" element={<QueryHistory />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
