@@ -18,11 +18,17 @@ interface CatalogEntry {
   kind: 'database' | 'schema' | 'table' | 'view'
 }
 
-const BADGE: Record<string, { label: string; cls: string }> = {
-  database: { label: 'DB', cls: 'tree-icon-db' },
-  schema:   { label: 'S',  cls: 'tree-icon-schema' },
-  table:    { label: 'T',  cls: 'tree-icon-table' },
-  view:     { label: 'V',  cls: 'tree-icon-view' },
+const CATALOG_ICON: Record<string, string | ((expanded: boolean) => string)> = {
+  database: '/file-icons/database.svg',
+  schema: (expanded: boolean) => expanded ? '/file-icons/folder-blue-open.svg' : '/file-icons/folder-blue.svg',
+  table: '/file-icons/grid-3x3.svg',
+  view: '/file-icons/grip.svg',
+}
+
+function catalogIconUrl(kind: string, isExpanded: boolean): string {
+  const entry = CATALOG_ICON[kind]
+  if (typeof entry === 'function') return entry(isExpanded)
+  return entry ?? '/file-icons/file.svg'
 }
 
 class CatalogTreeDataProvider implements TreeDataProvider<CatalogEntry> {
@@ -194,12 +200,12 @@ export function CatalogPanel({ refreshKey = 0, onSelectObject }: CatalogPanelPro
           canRename={false}
           onExpandItem={handleExpandItem}
           onSelectItems={handleSelectItems}
-          renderItemTitle={({ title, item }) => {
+          renderItemTitle={({ title, item, context }) => {
             if (!item) return <span>{title}</span>
-            const badge = BADGE[item.data.kind]
+            const iconUrl = catalogIconUrl(item.data.kind, context.isExpanded ?? false)
             return (
               <span className="catalog-tree-title">
-                <span className={`tree-type-badge ${badge.cls}`}>{badge.label}</span>
+                <img className="catalog-tree-icon" src={iconUrl} alt="" />
                 {title}
               </span>
             )

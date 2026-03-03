@@ -340,6 +340,13 @@
   gap: 0.4em;
 }
 
+.catalog-tree-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .tree-type-badge {
   font-size: 0.7em;
   font-weight: 700;
