@@ -7,9 +7,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
 from app.auth import verify_token
-from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_USER, SHELL_SSH_KEY_PATH
+from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_KEY_PATH
 from app.database import async_session
-from app.models import Project
+from app.models import Project, User
+from app.shell import ensure_shell_user
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -36,26 +37,30 @@ async def terminal_ws(websocket: WebSocket, project_id: str):
         await websocket.close(code=4401, reason="Not authenticated")
         return
 
-    # Look up project to get repo name
+    user_id = int(payload["sub"])
+    user_email = payload.get("email", "")
+
+    # Look up project and ensure shell user
     async with async_session() as session:
         result = await session.execute(
             select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
+        if project is None:
+            await websocket.close(code=4404, reason="Project not found")
+            return
 
-    if project is None:
-        await websocket.close(code=4404, reason="Project not found")
-        return
+        shell_username = await ensure_shell_user(user_id, user_email, session)
 
     await websocket.accept()
 
     conn = None
     try:
-        # Connect to shell pod via SSH
+        # Connect to shell pod as the user's own account
         conn = await asyncssh.connect(
             SHELL_SSH_HOST,
             port=SHELL_SSH_PORT,
-            username=SHELL_SSH_USER,
+            username=shell_username,
             client_keys=[SHELL_SSH_KEY_PATH],
             known_hosts=None,
         )
@@ -65,8 +70,8 @@ async def terminal_ws(websocket: WebSocket, project_id: str):
             term_size=(80, 24),
         )
 
-        # cd into the project directory
-        process.stdin.write(f"cd /home/{SHELL_SSH_USER}/projects/{project.gitea_repo_name}\n")
+        # cd into the project directory (home dir is automatic)
+        process.stdin.write(f"cd ~/projects/{project.gitea_repo_name}\n")
 
         # Task: SSH stdout → WebSocket
         async def ssh_to_ws():

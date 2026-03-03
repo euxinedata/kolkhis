@@ -10,6 +10,7 @@ from app.auth import require_auth
 from app.database import get_db
 from app.gitea import create_repo, create_or_update_file, delete_repo
 from app.models import Project
+from app.shell import ensure_shell_user
 from app.workspace import (
     clone_repo, ensure_clone, remove_repo,
     list_files as ws_list_files, read_file, write_file,
@@ -65,12 +66,30 @@ class DeleteItem(BaseModel):
     path: str
 
 
+def _user_id(user: dict) -> int:
+    return int(user["sub"])
+
+
+def _user_git(user: dict) -> dict:
+    return {"user_name": user.get("name", ""), "user_email": user.get("email", "")}
+
+
+async def _get_shell_username(user: dict, db: AsyncSession) -> str:
+    """Get or provision the shell username for the current user."""
+    return await ensure_shell_user(
+        _user_id(user), user.get("email", ""), db
+    )
+
+
 @router.get("")
 async def list_projects(
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+    uid = _user_id(user)
+    result = await db.execute(
+        select(Project).where(Project.user_id == uid).order_by(Project.created_at.desc())
+    )
     return [
         {
             "id": p.id,
@@ -86,12 +105,19 @@ async def list_projects(
 async def create_project(
     body: CreateProject,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    # Check for duplicate name
-    result = await db.execute(select(Project).where(Project.name == body.name))
+    uid = _user_id(user)
+
+    # Check for duplicate name per user
+    result = await db.execute(
+        select(Project).where(Project.user_id == uid, Project.name == body.name)
+    )
     if result.scalar() is not None:
         raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+
+    # Ensure shell user is provisioned
+    shell_username = await _get_shell_username(user, db)
 
     # Create Gitea repo
     repo_name = body.name.lower().replace(" ", "-")
@@ -110,13 +136,14 @@ async def create_project(
         await create_or_update_file(repo_name, path, rendered, f"Add {path}")
 
     # Clone locally and create dbt directories
-    await clone_repo(repo_name)
+    await clone_repo(shell_username, repo_name, **_user_git(user))
     for d in DBT_DIRS:
-        create_directory(repo_name, d)
+        create_directory(shell_username, repo_name, d)
 
     # Save to DB
     project = Project(
         id=str(uuid.uuid4()),
+        user_id=uid,
         name=body.name,
         description=body.description,
         gitea_repo_name=repo_name,
@@ -136,27 +163,28 @@ async def create_project(
 async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar()
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
 
     try:
         await delete_repo(project.gitea_repo_name)
     except Exception:
         pass  # Repo may already be gone
 
-    remove_repo(project.gitea_repo_name)
+    remove_repo(shell_username, project.gitea_repo_name)
 
     await db.delete(project)
     await db.commit()
     return {"deleted": project.id}
 
 
-async def _get_project(project_id: str, db: AsyncSession) -> Project:
-    result = await db.execute(select(Project).where(Project.id == project_id))
+async def _get_project(project_id: str, user_id: int, db: AsyncSession) -> Project:
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.user_id == user_id)
+    )
     project = result.scalar()
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -168,12 +196,14 @@ async def list_project_files(
     project_id: str,
     path: str = "",
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        entries = ws_list_files(project.gitea_repo_name, path)
+        entries = ws_list_files(shell_username, project.gitea_repo_name, path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
     return [
@@ -188,12 +218,14 @@ async def get_project_file(
     project_id: str,
     path: str,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        content = read_file(project.gitea_repo_name, path)
+        content = read_file(shell_username, project.gitea_repo_name, path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     return {"path": path, "content": content}
@@ -204,12 +236,14 @@ async def create_file(
     project_id: str,
     body: CreateFile,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        write_file(project.gitea_repo_name, body.path, body.content)
+        write_file(shell_username, project.gitea_repo_name, body.path, body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"path": body.path}
@@ -220,12 +254,14 @@ async def create_folder(
     project_id: str,
     body: CreateFolder,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        create_directory(project.gitea_repo_name, body.path)
+        create_directory(shell_username, project.gitea_repo_name, body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"path": body.path}
@@ -236,12 +272,14 @@ async def rename_item(
     project_id: str,
     body: RenameItem,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        rename_path(project.gitea_repo_name, body.old_path, body.new_path)
+        rename_path(shell_username, project.gitea_repo_name, body.old_path, body.new_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except FileExistsError as exc:
@@ -256,12 +294,14 @@ async def delete_file(
     project_id: str,
     body: DeleteItem,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
     try:
-        delete_path(project.gitea_repo_name, body.path)
+        delete_path(shell_username, project.gitea_repo_name, body.path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -273,8 +313,10 @@ async def delete_file(
 async def get_project_status(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_auth),
+    user: dict = Depends(require_auth),
 ):
-    project = await _get_project(project_id, db)
-    await ensure_clone(project.gitea_repo_name)
-    return await git_status(project.gitea_repo_name)
+    uid = _user_id(user)
+    project = await _get_project(project_id, uid, db)
+    shell_username = await _get_shell_username(user, db)
+    await ensure_clone(shell_username, project.gitea_repo_name, **_user_git(user))
+    return await git_status(shell_username, project.gitea_repo_name)

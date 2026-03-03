@@ -69,9 +69,10 @@ S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
 
 # Gitea configuration
 GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")
+GITEA_SHELL_URL = os.environ.get("GITEA_SHELL_URL", GITEA_URL)
 GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
 GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
-PROJECTS_PATH = os.environ.get("PROJECTS_PATH", "./data/projects")
+HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
 # Shell pod SSH configuration
 SHELL_SSH_HOST = os.environ.get("SHELL_SSH_HOST", "localhost")
