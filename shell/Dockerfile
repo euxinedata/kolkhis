@@ -12,6 +12,9 @@ RUN useradd -m -s /bin/bash shelluser
 RUN mkdir -p /home/shelluser/.ssh && chmod 700 /home/shelluser/.ssh && \
     chown shelluser:shelluser /home/shelluser/.ssh
 
+# Allow git to work in repos cloned by the backend (different UID)
+RUN git config --system --add safe.directory '*'
+
 # Allow shelluser to manage users (create accounts, chown home dirs)
 RUN echo 'shelluser ALL=(root) NOPASSWD: /usr/sbin/useradd, /bin/mkdir, /bin/cp, /bin/chown, /usr/bin/id' >> /etc/sudoers.d/shelluser
 
