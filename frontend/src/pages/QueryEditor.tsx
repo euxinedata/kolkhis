@@ -21,6 +21,80 @@ interface JobStatus {
   started_at: string | null
 }
 
+interface ColumnInfo {
+  name: string
+  type: string
+  required: boolean
+}
+
+interface ObjectSchema {
+  type: string
+  columns: ColumnInfo[]
+  sql?: string
+}
+
+interface OpenTab {
+  id: string
+  label: string
+  type: 'query' | 'object'
+  db?: string
+  schema?: string
+  name?: string
+  objectType?: string
+}
+
+const QUERY_TAB: OpenTab = { id: '__query__', label: 'Query', type: 'query' }
+
+function ObjectDetail({ db, schema, name, objectType }: { db: string; schema: string; name: string; objectType: string }) {
+  const [data, setData] = useState<ObjectSchema | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    apiFetch<ObjectSchema>(
+      `/api/catalog/databases/${db}/schemas/${schema}/objects/${name}/schema`
+    ).then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [db, schema, name])
+
+  if (loading) return <div className="object-detail"><span style={{ color: '#8888bb' }}>Loading...</span></div>
+  if (!data) return <div className="object-detail"><span style={{ color: '#f87171' }}>Failed to load schema</span></div>
+
+  const badge = objectType === 'view'
+    ? { label: 'V', cls: 'tree-icon-view' }
+    : { label: 'T', cls: 'tree-icon-table' }
+
+  return (
+    <div className="object-detail">
+      <div className="object-detail-header">
+        <span className={`tree-type-badge ${badge.cls}`}>{badge.label}</span>
+        <span className="object-detail-name">{db}.{schema}.{name}</span>
+      </div>
+      {data.type === 'view' && data.sql && (
+        <pre className="object-detail-sql">{data.sql}</pre>
+      )}
+      <div className="object-detail-columns">
+        <table>
+          <thead>
+            <tr>
+              <th className="tree-col-name">Column</th>
+              <th className="tree-col-type">Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.columns.map(col => (
+              <tr key={col.name}>
+                <td className="tree-col-name">{col.name}</td>
+                <td className="tree-col-type">{col.type}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function parseUTC(ts: string): number {
   return new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime()
 }
@@ -43,6 +117,10 @@ export function QueryEditor() {
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const submitRef = useRef<() => void>(() => {})
+
+  // Tab state
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([QUERY_TAB])
+  const [activeTab, setActiveTab] = useState('__query__')
 
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 
@@ -173,6 +251,24 @@ export function QueryEditor() {
     await fetchResults(jobId, page)
   }
 
+  function handleSelectObject(db: string, schema: string, name: string, objectType: string) {
+    const tabId = `${db}.${schema}.${name}`
+    const existing = openTabs.find(t => t.id === tabId)
+    if (existing) {
+      setActiveTab(tabId)
+      return
+    }
+    const newTab: OpenTab = { id: tabId, label: name, type: 'object', db, schema, name, objectType }
+    setOpenTabs(prev => [...prev, newTab])
+    setActiveTab(tabId)
+  }
+
+  function closeTab(tabId: string) {
+    if (tabId === '__query__') return
+    setOpenTabs(prev => prev.filter(t => t.id !== tabId))
+    if (activeTab === tabId) setActiveTab('__query__')
+  }
+
   const totalPages = result ? Math.ceil(result.total / result.page_size) : 0
 
   return (
@@ -189,107 +285,146 @@ export function QueryEditor() {
               ✕
             </button>
           </div>
-          <CatalogPanel refreshKey={catalogRefreshKey} />
+          <CatalogPanel refreshKey={catalogRefreshKey} onSelectObject={handleSelectObject} />
         </aside>
       )}
       <div className="query-main">
-        <div className="editor-area">
-          {!catalogOpen && (
-            <div style={{ flexShrink: 0 }}>
-              <button
-                className="catalog-toggle"
-                onClick={() => setCatalogOpen(true)}
-                title="Show catalog"
-              >
-                ☰
-              </button>
+        {/* Tab bar */}
+        <div className="query-tabs">
+          {openTabs.map(tab => (
+            <div
+              key={tab.id}
+              className={`query-tab ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span className="query-tab-name">{tab.label}</span>
+              {tab.type === 'object' && (
+                <span
+                  className="query-tab-close"
+                  onClick={e => { e.stopPropagation(); closeTab(tab.id) }}
+                >
+                  ✕
+                </span>
+              )}
             </div>
-          )}
-          <div style={{ flex: 1, minHeight: 0, border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
-            <Editor
-              height="100%"
-              language="sql"
-              theme={prefersDark ? 'vs-dark' : 'vs'}
-              value={sql}
-              onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
-              onMount={handleEditorMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                padding: { top: 8 },
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '1em', padding: '1em 0', alignItems: 'center', flexShrink: 0 }}>
-            {status === 'pending' || status === 'provisioning' || status === 'running' ? (
-              <button onClick={handleCancel}>Cancel</button>
-            ) : (
-              <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
-                {submitting ? 'Submitting...' : 'Run Query'}
-              </button>
-            )}
-            {status && (
-              <span className={`status-${status}`}>
-                {status}{elapsed && (status === 'pending' || status === 'provisioning' || status === 'running') ? `  ${elapsed}` : ''}
-              </span>
-            )}
-            {jobId && status === 'completed' && (
-              <a
-                href={`${API_URL}/api/queries/${jobId}/export`}
-                style={{ fontSize: '0.85em' }}
-              >
-                Download CSV
-              </a>
-            )}
-          </div>
+          ))}
         </div>
 
-        {error && (
-          <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em', flexShrink: 0 }}>
-            {error}
-          </pre>
+        {/* Query tab content */}
+        {activeTab === '__query__' && (
+          <>
+            <div className="editor-area">
+              {!catalogOpen && (
+                <div style={{ flexShrink: 0 }}>
+                  <button
+                    className="catalog-toggle"
+                    onClick={() => setCatalogOpen(true)}
+                    title="Show catalog"
+                  >
+                    ☰
+                  </button>
+                </div>
+              )}
+              <div style={{ flex: 1, minHeight: 0, border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
+                <Editor
+                  height="100%"
+                  language="sql"
+                  theme={prefersDark ? 'vs-dark' : 'vs'}
+                  value={sql}
+                  onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
+                  onMount={handleEditorMount}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    padding: { top: 8 },
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '1em', padding: '1em 0', alignItems: 'center', flexShrink: 0 }}>
+                {status === 'pending' || status === 'provisioning' || status === 'running' ? (
+                  <button onClick={handleCancel}>Cancel</button>
+                ) : (
+                  <button onClick={handleSubmit} disabled={submitting || !sql.trim()}>
+                    {submitting ? 'Submitting...' : 'Run Query'}
+                  </button>
+                )}
+                {status && (
+                  <span className={`status-${status}`}>
+                    {status}{elapsed && (status === 'pending' || status === 'provisioning' || status === 'running') ? `  ${elapsed}` : ''}
+                  </span>
+                )}
+                {jobId && status === 'completed' && (
+                  <a
+                    href={`${API_URL}/api/queries/${jobId}/export`}
+                    style={{ fontSize: '0.85em' }}
+                  >
+                    Download CSV
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {error && (
+              <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em', flexShrink: 0 }}>
+                {error}
+              </pre>
+            )}
+
+            {result && (
+              <div className="results-panel">
+                <div className="results-header">
+                  <span>{result.total} rows</span>
+                  <button className="results-close" onClick={() => setResult(null)} title="Close results">✕</button>
+                </div>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        {result.columns.map(col => (
+                          <th key={col}>{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.rows.map((row, i) => (
+                        <tr key={i}>
+                          {result.columns.map(col => (
+                            <td key={col}>{String(row[col] ?? '')}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="pagination">
+                  <button disabled={result.page === 0} onClick={() => handlePage(result.page - 1)}>
+                    Prev
+                  </button>
+                  <span>Page {result.page + 1} of {totalPages} ({result.total} rows)</span>
+                  <button disabled={result.page + 1 >= totalPages} onClick={() => handlePage(result.page + 1)}>
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
-        {result && (
-          <div className="results-panel">
-            <div className="results-header">
-              <span>{result.total} rows</span>
-              <button className="results-close" onClick={() => setResult(null)} title="Close results">✕</button>
-            </div>
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    {result.columns.map(col => (
-                      <th key={col}>{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.rows.map((row, i) => (
-                    <tr key={i}>
-                      {result.columns.map(col => (
-                        <td key={col}>{String(row[col] ?? '')}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="pagination">
-              <button disabled={result.page === 0} onClick={() => handlePage(result.page - 1)}>
-                Prev
-              </button>
-              <span>Page {result.page + 1} of {totalPages} ({result.total} rows)</span>
-              <button disabled={result.page + 1 >= totalPages} onClick={() => handlePage(result.page + 1)}>
-                Next
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Object detail tabs */}
+        {openTabs.filter(t => t.type === 'object').map(tab => (
+          activeTab === tab.id && (
+            <ObjectDetail
+              key={tab.id}
+              db={tab.db!}
+              schema={tab.schema!}
+              name={tab.name!}
+              objectType={tab.objectType!}
+            />
+          )
+        ))}
       </div>
     </div>
   )
