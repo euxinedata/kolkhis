@@ -12,7 +12,7 @@ from app.models import Project
 from app.workspace import (
     clone_repo, ensure_clone, remove_repo,
     list_files as ws_list_files, read_file, write_file,
-    create_directory, rename_path, git_status,
+    create_directory, rename_path, delete_path, git_status,
 )
 
 router = APIRouter(prefix="/api/projects")
@@ -36,13 +36,9 @@ test-paths: ["tests"]
       type: duckdb
       path: ':memory:'
 """,
-    "models/.gitkeep": "",
-    "models/staging/.gitkeep": "",
-    "models/marts/.gitkeep": "",
-    "seeds/.gitkeep": "",
-    "macros/.gitkeep": "",
-    "tests/.gitkeep": "",
 }
+
+DBT_DIRS = ["macros", "models", "seeds", "tests"]
 
 
 class CreateProject(BaseModel):
@@ -62,6 +58,10 @@ class CreateFolder(BaseModel):
 class RenameItem(BaseModel):
     old_path: str
     new_path: str
+
+
+class DeleteItem(BaseModel):
+    path: str
 
 
 @router.get("")
@@ -104,8 +104,10 @@ async def create_project(
         rendered = content.replace("{name}", body.name)
         await create_or_update_file(repo_name, path, rendered, f"Add {path}")
 
-    # Clone locally
+    # Clone locally and create dbt directories
     await clone_repo(repo_name)
+    for d in DBT_DIRS:
+        create_directory(repo_name, d)
 
     # Save to DB
     project = Project(
@@ -242,6 +244,24 @@ async def rename_item(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"old_path": body.old_path, "new_path": body.new_path}
+
+
+@router.delete("/{project_id}/files")
+async def delete_file(
+    project_id: str,
+    body: DeleteItem,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
+    project = await _get_project(project_id, db)
+    await ensure_clone(project.gitea_repo_name)
+    try:
+        delete_path(project.gitea_repo_name, body.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"deleted": body.path}
 
 
 @router.get("/{project_id}/status")

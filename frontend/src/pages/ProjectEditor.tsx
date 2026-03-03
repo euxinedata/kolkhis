@@ -38,6 +38,7 @@ interface ContextMenu {
 }
 
 const PLACEHOLDER_PREFIX = '__new__'
+const REPO_ROOT = 'repo-root'
 
 function languageForPath(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase()
@@ -90,9 +91,18 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
 
   constructor(projectId: string, projectName: string) {
     this.projectId = projectId
-    // Initialise root item
+    // Hidden container (never rendered)
     this.items['root'] = {
       index: 'root',
+      isFolder: true,
+      children: [REPO_ROOT],
+      canRename: false,
+      canMove: false,
+      data: { name: '', path: '', type: 'dir', size: 0 },
+    }
+    // Visible repo root
+    this.items[REPO_ROOT] = {
+      index: REPO_ROOT,
       isFolder: true,
       children: [],
       canRename: false,
@@ -104,11 +114,19 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
   async getTreeItem(itemId: TreeItemIndex): Promise<TreeItem<FileEntry>> {
     const id = String(itemId)
     if (this.items[id]) return this.items[id]
-    throw new Error(`Item ${id} not found`)
+    // Return a stub for items the library references after deletion (e.g. placeholders)
+    return {
+      index: id,
+      isFolder: false,
+      children: undefined,
+      canRename: false,
+      canMove: false,
+      data: { name: '', path: id, type: 'file', size: 0 },
+    }
   }
 
   async loadDirectory(dirPath: string, force = false): Promise<void> {
-    const itemId = dirPath === '' ? 'root' : dirPath
+    const itemId = dirPath === '' ? REPO_ROOT : dirPath
     const existing = this.items[itemId]
     if (!force && existing?.children && existing.children.length > 0) return
 
@@ -145,7 +163,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
 
   createPlaceholder(targetDir: string, isFolder: boolean): string {
     const placeholderId = `${PLACEHOLDER_PREFIX}${targetDir}/${isFolder ? 'd' : 'f'}`
-    const parentId = targetDir === '' ? 'root' : targetDir
+    const parentId = targetDir === '' ? REPO_ROOT : targetDir
 
     this.items[placeholderId] = {
       index: placeholderId,
@@ -167,7 +185,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
     // Extract parent dir from placeholder ID: "__new__<dir>/<f|d>"
     const inner = placeholderId.slice(PLACEHOLDER_PREFIX.length)
     const parentDir = inner.substring(0, inner.lastIndexOf('/'))
-    const parentId = parentDir === '' ? 'root' : parentDir
+    const parentId = parentDir === '' ? REPO_ROOT : parentDir
 
     const parent = this.items[parentId]
     if (parent) {
@@ -182,6 +200,10 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
 
   isPlaceholder(id: string): boolean {
     return id.startsWith(PLACEHOLDER_PREFIX)
+  }
+
+  getItemSync(itemId: string): TreeItem<FileEntry> | undefined {
+    return this.items[itemId]
   }
 
   // --- TreeDataProvider interface ---
@@ -211,9 +233,9 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
         body: JSON.stringify(body),
       })
 
-      // Remove placeholder and reload directory
-      delete this.items[oldId]
+      // Reload directory — replaces children list, effectively removing the placeholder
       await this.loadDirectory(targetDir, true)
+      delete this.items[oldId]
     } else {
       // Real rename
       const parentDir = oldId.includes('/') ? oldId.substring(0, oldId.lastIndexOf('/')) : ''
@@ -319,7 +341,13 @@ export function ProjectEditor() {
   // Close context menu on click outside or Escape
   useEffect(() => {
     if (!contextMenu) return
-    const handleClick = () => { setContextMenu(null); setContextTarget(null) }
+    const handleClick = (e: MouseEvent) => {
+      // Don't close when clicking inside the context menu itself
+      const menuEl = document.querySelector('.context-menu')
+      if (menuEl && menuEl.contains(e.target as Node)) return
+      setContextMenu(null)
+      setContextTarget(null)
+    }
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { setContextMenu(null); setContextTarget(null) }
     }
@@ -347,26 +375,22 @@ export function ProjectEditor() {
     }
   }
 
-  function handleContextMenu(e: React.MouseEvent, targetDir: string, nodePath?: string) {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, targetDir })
-    setContextTarget(nodePath ?? null)
-  }
-
-  function handleMenuAction(kind: 'file' | 'folder') {
+  async function handleMenuAction(kind: 'file' | 'folder') {
     if (!contextMenu || !dataProviderRef.current) return
     const targetDir = contextMenu.targetDir
     const isFolder = kind === 'folder'
     const provider = dataProviderRef.current
 
-    // Ensure target dir is expanded
+    // Load directory contents first so the expand handler becomes a no-op
+    await provider.loadDirectory(targetDir)
+
+    // Create placeholder BEFORE expanding so the tree sees non-empty children
+    const placeholderId = provider.createPlaceholder(targetDir, isFolder)
+    activePlaceholderRef.current = placeholderId
+
     if (targetDir !== '') {
       treeRef.current?.expandItem(targetDir)
     }
-
-    const placeholderId = provider.createPlaceholder(targetDir, isFolder)
-    activePlaceholderRef.current = placeholderId
 
     // Wait for tree to render the placeholder, then trigger rename on it
     requestAnimationFrame(() => {
@@ -384,12 +408,35 @@ export function ProjectEditor() {
     setContextTarget(null)
   }
 
+  async function handleDeleteAction() {
+    if (!contextTarget || !projectId || !dataProviderRef.current) return
+    const path = contextTarget
+    setContextMenu(null)
+    setContextTarget(null)
+
+    await apiFetch(`/api/projects/${projectId}/files`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+
+    const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
+    await dataProviderRef.current.loadDirectory(parentDir, true)
+
+    if (selectedFile === path || selectedFile?.startsWith(path + '/')) {
+      setSelectedFile(null)
+      setFileContent('')
+    }
+
+    await loadStatus()
+  }
+
   // --- react-complex-tree event handlers ---
 
   const handleSelectItems = useCallback((items: TreeItemIndex[]) => {
     if (items.length === 0) return
     const id = String(items[0])
-    if (id === 'root' || id.startsWith(PLACEHOLDER_PREFIX)) return
+    if (id === 'root' || id === REPO_ROOT || id.startsWith(PLACEHOLDER_PREFIX)) return
     const provider = dataProviderRef.current
     if (!provider) return
     provider.getTreeItem(id).then(item => {
@@ -399,7 +446,7 @@ export function ProjectEditor() {
 
   const handleExpandItem = useCallback((item: TreeItem<FileEntry>) => {
     const id = String(item.index)
-    const dirPath = id === 'root' ? '' : id
+    const dirPath = (id === 'root' || id === REPO_ROOT) ? '' : id
     dataProviderRef.current?.loadDirectory(dirPath)
   }, [])
 
@@ -438,40 +485,47 @@ export function ProjectEditor() {
     }
   }, [])
 
-  // Context menu via event delegation on the tree container
-  function handleTreeContextMenu(e: React.MouseEvent) {
-    // Walk up from the target to find the rct interactive element with data-rct-item-id
-    let el = e.target as HTMLElement | null
-    let itemId: string | null = null
-    while (el && !el.classList.contains('file-tree-list')) {
-      itemId = el.getAttribute('data-rct-item-id')
-      if (itemId) break
-      el = el.parentElement
-    }
+  // Context menu via native event listener on the tree container.
+  // Using a native listener (not React onContextMenu) so that
+  // preventDefault() fires directly on the native event before the
+  // browser can act on it.
+  const treeListRef = useRef<HTMLDivElement>(null)
 
-    if (!itemId) {
-      // Clicked empty space
-      handleContextMenu(e, '')
-      return
-    }
+  useEffect(() => {
+    const el = treeListRef.current
+    if (!el) return
 
-    e.preventDefault()
-    e.stopPropagation()
+    const handler = (e: MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
 
-    if (itemId === 'root') {
-      handleContextMenu(e, '')
-      return
-    }
+      // Walk up from the target to find data-rct-item-id
+      let node = e.target as HTMLElement | null
+      let itemId: string | null = null
+      while (node && node !== el) {
+        itemId = node.getAttribute('data-rct-item-id')
+        if (itemId) break
+        node = node.parentElement
+      }
 
-    const provider = dataProviderRef.current
-    if (!provider) return
-    provider.getTreeItem(itemId).then(item => {
-      const isFolder = item.isFolder
-      const targetDir = isFolder ? itemId! : (itemId!.includes('/') ? itemId!.substring(0, itemId!.lastIndexOf('/')) : '')
+      if (!itemId || itemId === 'root' || itemId === REPO_ROOT) {
+        setContextMenu({ x: e.clientX, y: e.clientY, targetDir: '' })
+        setContextTarget(null)
+        return
+      }
+
+      const provider = dataProviderRef.current
+      if (!provider) return
+      const item = provider.getItemSync(itemId)
+      if (!item) return
+      const targetDir = item.isFolder ? itemId : (itemId.includes('/') ? itemId.substring(0, itemId.lastIndexOf('/')) : '')
       setContextMenu({ x: e.clientX, y: e.clientY, targetDir })
       setContextTarget(itemId)
-    })
-  }
+    }
+
+    el.addEventListener('contextmenu', handler)
+    return () => el.removeEventListener('contextmenu', handler)
+  }, [treeKey]) // re-attach when tree remounts
 
   if (loading) return <p style={{ color: '#8888bb', padding: '1em' }}>Loading...</p>
   if (error) return <p style={{ color: '#f87171', padding: '1em' }}>{error}</p>
@@ -491,15 +545,15 @@ export function ProjectEditor() {
           <div className="file-tree-title">Files</div>
           <div
             className="file-tree-list"
-            onContextMenu={handleTreeContextMenu}
+            ref={treeListRef}
           >
             <UncontrolledTreeEnvironment
               key={treeKey}
               dataProvider={dataProviderRef.current}
-              getItemTitle={item => item.data.name}
+              getItemTitle={item => item?.data?.name ?? ''}
               viewState={{
                 'file-tree': {
-                  expandedItems: ['root'],
+                  expandedItems: ['root', REPO_ROOT],
                 },
               }}
               defaultInteractionMode={InteractionMode.ClickItemToExpand}
@@ -511,9 +565,10 @@ export function ProjectEditor() {
               onRenameItem={handleRenameItem}
               onAbortRenamingItem={handleAbortRenaming}
               renderItemTitle={({ title, item, context }) => {
+                if (!item) return <span>{title}</span>
                 const iconUrl = item.isFolder
                   ? folderIconUrl(context.isExpanded ?? false)
-                  : fileIconUrl(item.data.name)
+                  : fileIconUrl(item.data?.name ?? '')
                 return (
                   <span className="file-tree-title-with-icon">
                     <img className="file-tree-icon" src={iconUrl} alt="" />
@@ -569,9 +624,14 @@ export function ProjectEditor() {
             New Folder
           </div>
           {contextTarget && (
-            <div className="context-menu-item" onClick={e => { e.stopPropagation(); handleRenameAction() }}>
-              Rename
-            </div>
+            <>
+              <div className="context-menu-item" onClick={e => { e.stopPropagation(); handleRenameAction() }}>
+                Rename
+              </div>
+              <div className="context-menu-item" onClick={e => { e.stopPropagation(); handleDeleteAction() }}>
+                Delete
+              </div>
+            </>
           )}
         </div>
       )}

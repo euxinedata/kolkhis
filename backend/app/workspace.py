@@ -89,6 +89,16 @@ def create_directory(repo_name: str, path: str) -> None:
     target.mkdir(parents=True, exist_ok=True)
 
 
+def delete_path(repo_name: str, path: str) -> None:
+    target = _safe_path(repo_name, path)
+    if not target.exists():
+        raise FileNotFoundError(f"Path not found: {path}")
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+
 def rename_path(repo_name: str, old_path: str, new_path: str) -> None:
     old = _safe_path(repo_name, old_path)
     new = _safe_path(repo_name, new_path)
