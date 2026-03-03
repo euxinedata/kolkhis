@@ -297,6 +297,11 @@ export function ProjectEditor() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [contextTarget, setContextTarget] = useState<string | null>(null)
 
+  // Terminal context menu / rename state
+  const [termContextMenu, setTermContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null)
+  const [renamingTerminalId, setRenamingTerminalId] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
   // VCS status state (used once we add custom styling back)
   const [, setVcsStatus] = useState<Record<string, string>>({})
 
@@ -378,6 +383,21 @@ export function ProjectEditor() {
       document.removeEventListener('keydown', handleKey)
     }
   }, [contextMenu])
+
+  // Close terminal context menu on click outside or Escape
+  useEffect(() => {
+    if (!termContextMenu) return
+    const handleClick = () => setTermContextMenu(null)
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTermContextMenu(null)
+    }
+    document.addEventListener('click', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('click', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [termContextMenu])
 
   // Ctrl+` toggle terminal
   useEffect(() => {
@@ -522,6 +542,33 @@ export function ProjectEditor() {
         setTerminalOpen(true)
       }
     }
+  }
+
+  function handleTerminalContextMenu(e: React.MouseEvent, tabId: number) {
+    e.preventDefault()
+    e.stopPropagation()
+    setTermContextMenu({ x: e.clientX, y: e.clientY, tabId })
+  }
+
+  function startRenamingTerminal() {
+    if (!termContextMenu) return
+    const tab = terminalTabs.find(t => t.id === termContextMenu.tabId)
+    if (!tab) return
+    setRenamingTerminalId(termContextMenu.tabId)
+    setRenameValue(tab.name)
+    setTermContextMenu(null)
+  }
+
+  function commitTerminalRename() {
+    if (renamingTerminalId === null) return
+    const name = renameValue.trim()
+    if (name) {
+      setTerminalTabs(prev => prev.map(t =>
+        t.id === renamingTerminalId ? { ...t, name } : t
+      ))
+    }
+    setRenamingTerminalId(null)
+    setRenameValue('')
   }
 
   async function handleMenuAction(kind: 'file' | 'folder') {
@@ -691,14 +738,6 @@ export function ProjectEditor() {
           ← Projects
         </button>
         <span className="project-editor-name">{project.name}</span>
-        <div className="project-editor-header-spacer" />
-        <button
-          className={`terminal-toggle-btn${terminalOpen ? ' active' : ''}`}
-          onClick={toggleTerminal}
-          title="Toggle Terminal (Ctrl+`)"
-        >
-          Terminal
-        </button>
       </div>
       <div className="project-editor-body">
         <div className="file-tree-panel" style={{ width: treeWidth, minWidth: treeWidth }}>
@@ -822,8 +861,24 @@ export function ProjectEditor() {
                       key={tab.id}
                       className={`terminal-tab${tab.id === activeTerminalTab ? ' active' : ''}`}
                       onClick={() => setActiveTerminalTab(tab.id)}
+                      onContextMenu={e => handleTerminalContextMenu(e, tab.id)}
                     >
-                      <span className="terminal-tab-name">{tab.name}</span>
+                      {renamingTerminalId === tab.id ? (
+                        <input
+                          className="terminal-tab-rename"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={commitTerminalRename}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitTerminalRename()
+                            if (e.key === 'Escape') { setRenamingTerminalId(null); setRenameValue('') }
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="terminal-tab-name">{tab.name}</span>
+                      )}
                       <span
                         className="terminal-tab-close"
                         onClick={e => { e.stopPropagation(); closeTerminal(tab.id) }}
@@ -838,6 +893,22 @@ export function ProjectEditor() {
               </div>
             </>
           )}
+        </div>
+      </div>
+      <div className="status-bar">
+        <div className="status-bar-left">
+          {activeTab && (
+            <span className="status-bar-item">{activeTab}</span>
+          )}
+        </div>
+        <div className="status-bar-right">
+          <button
+            className={`status-bar-btn${terminalOpen ? ' active' : ''}`}
+            onClick={toggleTerminal}
+            title="Toggle Terminal (Ctrl+`)"
+          >
+            Terminal
+          </button>
         </div>
       </div>
 
@@ -862,6 +933,20 @@ export function ProjectEditor() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {termContextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: termContextMenu.x, top: termContextMenu.y }}
+        >
+          <div className="context-menu-item" onClick={e => { e.stopPropagation(); startRenamingTerminal() }}>
+            Rename
+          </div>
+          <div className="context-menu-item" onClick={e => { e.stopPropagation(); setTermContextMenu(null); closeTerminal(termContextMenu.tabId) }}>
+            Close
+          </div>
         </div>
       )}
     </div>
