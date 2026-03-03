@@ -175,13 +175,14 @@ export function CatalogPanel({ refreshKey = 0, onSelectObject }: CatalogPanelPro
     if (!onSelectObject || items.length === 0) return
     const id = String(items[0])
     const parts = id.split('.')
-    if (parts.length !== 3) return
-    const item = providerRef.current?.getTreeItem(id)
-    if (!item) return
-    // getTreeItem is async but we know it's already loaded
-    void item.then(i => {
-      if (i.data.kind === 'table' || i.data.kind === 'view') {
-        onSelectObject(parts[0], parts[1], parts[2], i.data.kind)
+    void providerRef.current?.getTreeItem(id).then(i => {
+      const kind = i.data.kind
+      if (kind === 'database') {
+        onSelectObject(parts[0], '', '', 'database')
+      } else if (kind === 'schema') {
+        onSelectObject(parts[0], parts[1], '', 'schema')
+      } else {
+        onSelectObject(parts[0], parts[1], parts[2], kind)
       }
     })
   }

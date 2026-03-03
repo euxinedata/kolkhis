@@ -33,10 +33,15 @@ interface ObjectSchema {
   sql?: string
 }
 
+interface CatalogObjectInfo {
+  name: string
+  type: string
+}
+
 interface OpenTab {
   id: string
   label: string
-  type: 'query' | 'object'
+  type: 'query' | 'object' | 'database' | 'schema'
   db?: string
   schema?: string
   name?: string
@@ -44,6 +49,93 @@ interface OpenTab {
 }
 
 const QUERY_TAB: OpenTab = { id: '__query__', label: 'Query', type: 'query' }
+
+function DatabaseDetail({ db }: { db: string }) {
+  const [schemas, setSchemas] = useState<{ name: string }[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    apiFetch<{ name: string }[]>(`/api/catalog/databases/${db}/schemas`)
+      .then(d => { setSchemas(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [db])
+
+  if (loading) return <div className="object-detail"><span style={{ color: '#8888bb' }}>Loading...</span></div>
+  if (!schemas) return <div className="object-detail"><span style={{ color: '#f87171' }}>Failed to load database</span></div>
+
+  return (
+    <div className="object-detail">
+      <div className="object-detail-header">
+        <img className="catalog-detail-icon" src="/file-icons/database.svg" alt="" />
+        <span className="object-detail-name">{db}</span>
+      </div>
+      <div className="object-detail-section">
+        <span className="object-detail-label">{schemas.length} {schemas.length === 1 ? 'schema' : 'schemas'}</span>
+      </div>
+      <div className="object-detail-columns">
+        <table>
+          <thead>
+            <tr><th className="tree-col-name">Schema</th></tr>
+          </thead>
+          <tbody>
+            {schemas.map(s => (
+              <tr key={s.name}><td className="tree-col-name">{s.name}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SchemaDetail({ db, schema }: { db: string; schema: string }) {
+  const [objects, setObjects] = useState<CatalogObjectInfo[] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    apiFetch<CatalogObjectInfo[]>(`/api/catalog/databases/${db}/schemas/${schema}/objects`)
+      .then(d => { setObjects(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [db, schema])
+
+  if (loading) return <div className="object-detail"><span style={{ color: '#8888bb' }}>Loading...</span></div>
+  if (!objects) return <div className="object-detail"><span style={{ color: '#f87171' }}>Failed to load schema</span></div>
+
+  const tables = objects.filter(o => o.type === 'table')
+  const views = objects.filter(o => o.type === 'view')
+
+  return (
+    <div className="object-detail">
+      <div className="object-detail-header">
+        <img className="catalog-detail-icon" src="/file-icons/folder-blue.svg" alt="" />
+        <span className="object-detail-name">{db}.{schema}</span>
+      </div>
+      <div className="object-detail-section">
+        <span className="object-detail-label">{tables.length} {tables.length === 1 ? 'table' : 'tables'}, {views.length} {views.length === 1 ? 'view' : 'views'}</span>
+      </div>
+      <div className="object-detail-columns">
+        <table>
+          <thead>
+            <tr>
+              <th className="tree-col-name">Object</th>
+              <th className="tree-col-type">Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {objects.map(o => (
+              <tr key={o.name}>
+                <td className="tree-col-name">{o.name}</td>
+                <td className="tree-col-type">{o.type}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
 function ObjectDetail({ db, schema, name, objectType }: { db: string; schema: string; name: string; objectType: string }) {
   const [data, setData] = useState<ObjectSchema | null>(null)
@@ -252,13 +344,28 @@ export function QueryEditor() {
   }
 
   function handleSelectObject(db: string, schema: string, name: string, objectType: string) {
-    const tabId = `${db}.${schema}.${name}`
+    let tabId: string
+    let label: string
+    let tabType: OpenTab['type']
+    if (objectType === 'database') {
+      tabId = db
+      label = db
+      tabType = 'database'
+    } else if (objectType === 'schema') {
+      tabId = `${db}.${schema}`
+      label = schema
+      tabType = 'schema'
+    } else {
+      tabId = `${db}.${schema}.${name}`
+      label = name
+      tabType = 'object'
+    }
     const existing = openTabs.find(t => t.id === tabId)
     if (existing) {
       setActiveTab(tabId)
       return
     }
-    const newTab: OpenTab = { id: tabId, label: name, type: 'object', db, schema, name, objectType }
+    const newTab: OpenTab = { id: tabId, label, type: tabType, db, schema, name, objectType }
     setOpenTabs(prev => [...prev, newTab])
     setActiveTab(tabId)
   }
@@ -297,8 +404,11 @@ export function QueryEditor() {
               className={`query-tab ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
             >
+              <span className={`query-tab-badge query-tab-badge-${tab.type === 'object' ? tab.objectType : tab.type}`}>
+                {{ query: 'Q', database: 'DB', schema: 'S', object: tab.objectType === 'view' ? 'V' : 'T' }[tab.type]}
+              </span>
               <span className="query-tab-name">{tab.label}</span>
-              {tab.type === 'object' && (
+              {tab.type !== 'query' && (
                 <span
                   className="query-tab-close"
                   onClick={e => { e.stopPropagation(); closeTab(tab.id) }}
@@ -413,16 +523,16 @@ export function QueryEditor() {
           </>
         )}
 
-        {/* Object detail tabs */}
-        {openTabs.filter(t => t.type === 'object').map(tab => (
+        {/* Detail tabs */}
+        {openTabs.filter(t => t.type !== 'query').map(tab => (
           activeTab === tab.id && (
-            <ObjectDetail
-              key={tab.id}
-              db={tab.db!}
-              schema={tab.schema!}
-              name={tab.name!}
-              objectType={tab.objectType!}
-            />
+            tab.type === 'database' ? (
+              <DatabaseDetail key={tab.id} db={tab.db!} />
+            ) : tab.type === 'schema' ? (
+              <SchemaDetail key={tab.id} db={tab.db!} schema={tab.schema!} />
+            ) : (
+              <ObjectDetail key={tab.id} db={tab.db!} schema={tab.schema!} name={tab.name!} objectType={tab.objectType!} />
+            )
           )
         ))}
       </div>
