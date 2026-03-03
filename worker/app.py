@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -8,9 +9,28 @@ import duckdb
 
 from config import WORKER_AUTH_TOKEN
 from executor import cancel, execute_query
+from sessions import session_manager
 
 
-app = FastAPI(title="Kolkhis Worker")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_reap_sessions())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _reap_sessions():
+    while True:
+        await asyncio.sleep(60)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, session_manager.cleanup_expired)
+
+
+app = FastAPI(title="Kolkhis Worker", lifespan=lifespan)
 
 
 # --- Auth dependency ---
@@ -132,3 +152,66 @@ async def cancel_query(job_id: str, _auth: Authenticated):
     if not cancelled:
         raise HTTPException(status_code=409, detail="Job not running or already finished")
     return {"status": "cancelling"}
+
+
+# --- Session models ---
+
+
+class SessionS3Config(BaseModel):
+    endpoint: str
+    access_key: str
+    secret_key: str
+    region: str
+
+
+class CreateSessionRequest(BaseModel):
+    catalog_objects: list[CatalogObject]
+    s3: SessionS3Config
+
+
+class SessionQueryRequest(BaseModel):
+    sql: str
+    fetch_results: bool = True
+
+
+# --- Session endpoints ---
+
+
+@app.post("/session")
+async def create_session(req: CreateSessionRequest, _auth: Authenticated):
+    loop = asyncio.get_running_loop()
+    session_id = await loop.run_in_executor(
+        None,
+        session_manager.create,
+        [obj.model_dump() for obj in req.catalog_objects],
+        req.s3.endpoint,
+        req.s3.access_key,
+        req.s3.secret_key,
+        req.s3.region,
+    )
+    return {"session_id": session_id}
+
+
+@app.post("/session/{session_id}/query")
+async def session_query(session_id: str, req: SessionQueryRequest, _auth: Authenticated):
+    if session_manager.get(session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None, session_manager.execute, session_id, req.sql, req.fetch_results,
+    )
+    return result
+
+
+@app.delete("/session/{session_id}")
+async def close_session(session_id: str, _auth: Authenticated):
+    if not session_manager.close(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "closed"}
+
+
+@app.post("/session/{session_id}/keepalive")
+async def session_keepalive(session_id: str, _auth: Authenticated):
+    if not session_manager.keepalive(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "ok"}
