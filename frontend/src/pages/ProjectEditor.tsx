@@ -16,6 +16,8 @@ import type {
 import 'react-complex-tree/lib/style-modern.css'
 import { apiFetch } from '../api'
 import Terminal from '../components/Terminal'
+import { CatalogPanel } from '../components/CatalogPanel'
+import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
 import './ProjectEditor.css'
 
 interface Project {
@@ -45,6 +47,11 @@ interface OpenTab {
   cursorLine: number
   cursorColumn: number
   scrollTop: number
+  tabType?: 'file' | 'database' | 'schema' | 'object'
+  db?: string
+  schema?: string
+  objectName?: string
+  objectType?: string
 }
 
 interface EditorSession {
@@ -360,6 +367,9 @@ export function ProjectEditor() {
   const [treeKey, setTreeKey] = useState(0)
   // Track active placeholder for cleanup
   const activePlaceholderRef = useRef<string | null>(null)
+
+  // Sidebar mode: files or databases
+  const [sidebarMode, setSidebarMode] = useState<'files' | 'databases'>('files')
 
   // Persist session to localStorage (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -753,6 +763,44 @@ export function ProjectEditor() {
     await loadStatus()
   }
 
+  // --- Catalog detail tabs ---
+
+  function handleCatalogSelect(db: string, schema: string, name: string, objectType: string) {
+    let tabId: string
+    let tabType: OpenTab['tabType']
+    if (objectType === 'database') {
+      tabId = `__catalog__:${db}`
+      tabType = 'database'
+    } else if (objectType === 'schema') {
+      tabId = `__catalog__:${db}.${schema}`
+      tabType = 'schema'
+    } else {
+      tabId = `__catalog__:${db}.${schema}.${name}`
+      tabType = 'object'
+    }
+    if (openTabsRef.current.some(t => t.path === tabId)) {
+      flushEditorState()
+      setActiveTab(tabId)
+      return
+    }
+    flushEditorState()
+    const newTab: OpenTab = {
+      path: tabId,
+      content: '',
+      savedContent: '',
+      cursorLine: 1,
+      cursorColumn: 1,
+      scrollTop: 0,
+      tabType,
+      db,
+      schema,
+      objectName: name,
+      objectType,
+    }
+    setOpenTabs(prev => [...prev, newTab])
+    setActiveTab(tabId)
+  }
+
   // --- react-complex-tree event handlers ---
 
   const handleSelectItems = useCallback((items: TreeItemIndex[]) => {
@@ -866,49 +914,60 @@ export function ProjectEditor() {
       </div>
       <div className="project-editor-body">
         <div className="file-tree-panel" style={{ width: treeWidth, minWidth: treeWidth }}>
-          <div className="file-tree-title">Files</div>
-          <div
-            className="file-tree-list"
-            ref={treeListRef}
-          >
-            <UncontrolledTreeEnvironment
-              key={treeKey}
-              dataProvider={dataProviderRef.current}
-              getItemTitle={item => item?.data?.name ?? ''}
-              viewState={{
-                'file-tree': {
-                  expandedItems: ['root', REPO_ROOT],
-                },
-              }}
-              defaultInteractionMode={InteractionMode.ClickItemToExpand}
-              canDragAndDrop={false}
-              canSearch={false}
-              canRename={true}
-              onSelectItems={handleSelectItems}
-              onExpandItem={handleExpandItem}
-              onRenameItem={handleRenameItem}
-              onAbortRenamingItem={handleAbortRenaming}
-              renderItemTitle={({ title, item, context }) => {
-                if (!item) return <span>{title}</span>
-                const iconUrl = item.isFolder
-                  ? folderIconUrl(context.isExpanded ?? false)
-                  : fileIconUrl(item.data?.name ?? '')
-                return (
-                  <span className="file-tree-title-with-icon">
-                    <img className="file-tree-icon" src={iconUrl} alt="" />
-                    {title}
-                  </span>
-                )
-              }}
-            >
-              <Tree<FileEntry>
-                ref={treeRef}
-                treeId="file-tree"
-                rootItem="root"
-                treeLabel="Files"
-              />
-            </UncontrolledTreeEnvironment>
+          <div className="sidebar-tabs">
+            <div className={`sidebar-tab ${sidebarMode === 'files' ? 'active' : ''}`}
+                 onClick={() => setSidebarMode('files')}>Files</div>
+            <div className={`sidebar-tab ${sidebarMode === 'databases' ? 'active' : ''}`}
+                 onClick={() => setSidebarMode('databases')}>Databases</div>
           </div>
+          {sidebarMode === 'files' ? (
+            <div
+              className="file-tree-list"
+              ref={treeListRef}
+            >
+              <UncontrolledTreeEnvironment
+                key={treeKey}
+                dataProvider={dataProviderRef.current}
+                getItemTitle={item => item?.data?.name ?? ''}
+                viewState={{
+                  'file-tree': {
+                    expandedItems: ['root', REPO_ROOT],
+                  },
+                }}
+                defaultInteractionMode={InteractionMode.ClickItemToExpand}
+                canDragAndDrop={false}
+                canSearch={false}
+                canRename={true}
+                onSelectItems={handleSelectItems}
+                onExpandItem={handleExpandItem}
+                onRenameItem={handleRenameItem}
+                onAbortRenamingItem={handleAbortRenaming}
+                renderItemTitle={({ title, item, context }) => {
+                  if (!item) return <span>{title}</span>
+                  const iconUrl = item.isFolder
+                    ? folderIconUrl(context.isExpanded ?? false)
+                    : fileIconUrl(item.data?.name ?? '')
+                  return (
+                    <span className="file-tree-title-with-icon">
+                      <img className="file-tree-icon" src={iconUrl} alt="" />
+                      {title}
+                    </span>
+                  )
+                }}
+              >
+                <Tree<FileEntry>
+                  ref={treeRef}
+                  treeId="file-tree"
+                  rootItem="root"
+                  treeLabel="Files"
+                />
+              </UncontrolledTreeEnvironment>
+            </div>
+          ) : (
+            <div className="file-tree-list">
+              <CatalogPanel onSelectObject={handleCatalogSelect} />
+            </div>
+          )}
         </div>
         <div className="tree-resize-handle" onMouseDown={handleTreeResizeMouseDown} />
         <div className="file-editor-panel">
@@ -916,15 +975,28 @@ export function ProjectEditor() {
             {openTabs.length > 0 && (
               <div className="editor-tabs">
                 {openTabs.map(tab => {
-                  const dirty = tab.content !== tab.savedContent
-                  const name = tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path
+                  const isCatalog = tab.tabType && tab.tabType !== 'file'
+                  const dirty = !isCatalog && tab.content !== tab.savedContent
+                  const name = isCatalog
+                    ? tab.path.replace('__catalog__:', '')
+                    : (tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path)
+                  const badgeMap: Record<string, string> = { database: 'DB', schema: 'S', table: 'T', view: 'V' }
+                  const badgeLabel = isCatalog
+                    ? (tab.tabType === 'object' ? badgeMap[tab.objectType ?? 'table'] : badgeMap[tab.tabType!])
+                    : null
+                  const badgeType = isCatalog
+                    ? (tab.tabType === 'object' ? tab.objectType : tab.tabType)
+                    : null
                   return (
                     <div
                       key={tab.path}
                       className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
-                      title={tab.path}
+                      title={isCatalog ? tab.path.replace('__catalog__:', '') : tab.path}
                       onClick={() => { flushEditorState(); setActiveTab(tab.path) }}
                     >
+                      {badgeLabel && (
+                        <span className={`query-tab-badge query-tab-badge-${badgeType}`}>{badgeLabel}</span>
+                      )}
                       <span className="editor-tab-name">{name}</span>
                       <span
                         className={`editor-tab-close${dirty ? ' dirty' : ''}`}
@@ -938,8 +1010,18 @@ export function ProjectEditor() {
               </div>
             )}
             <div className="file-editor-content">
-              {activeTab ? (
-                fileLoading && !openTabs.some(t => t.path === activeTab) ? (
+              {activeTab ? (() => {
+                const currentTab = openTabs.find(t => t.path === activeTab)
+                if (currentTab?.tabType === 'database') {
+                  return <DatabaseDetail db={currentTab.db!} />
+                }
+                if (currentTab?.tabType === 'schema') {
+                  return <SchemaDetail db={currentTab.db!} schema={currentTab.schema!} />
+                }
+                if (currentTab?.tabType === 'object') {
+                  return <ObjectDetail db={currentTab.db!} schema={currentTab.schema!} name={currentTab.objectName!} objectType={currentTab.objectType!} />
+                }
+                return fileLoading && !openTabs.some(t => t.path === activeTab) ? (
                   <div className="file-editor-empty">Loading...</div>
                 ) : (
                   <Editor
@@ -977,7 +1059,7 @@ export function ProjectEditor() {
                     }}
                   />
                 )
-              ) : (
+              })() : (
                 <div className="file-editor-empty">Select a file to view</div>
               )}
             </div>
@@ -1040,7 +1122,9 @@ export function ProjectEditor() {
       <div className="status-bar">
         <div className="status-bar-left">
           {activeTab && (
-            <span className="status-bar-item">{activeTab}</span>
+            <span className="status-bar-item">
+              {activeTab.startsWith('__catalog__:') ? activeTab.replace('__catalog__:', '') : activeTab}
+            </span>
           )}
         </div>
         <div className="status-bar-right">
