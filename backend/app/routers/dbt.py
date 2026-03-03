@@ -99,7 +99,7 @@ async def materialize(
     _: None = Depends(_verify_token),
     arrow_data: UploadFile = File(...),
     database: str = Form(...),
-    schema: str = Form(...),
+    schema_name: str = Form(...),
     table_name: str = Form(...),
 ):
     """Persist an Arrow table to Iceberg and register in the catalog."""
@@ -107,8 +107,8 @@ async def materialize(
     reader = ipc.open_stream(raw)
     arrow_table = reader.read_all()
 
-    iceberg_ns = f"{database}.{schema}"
-    iceberg_id = f"{database}.{schema}.{table_name}"
+    iceberg_ns = f"{database}.{schema_name}"
+    iceberg_id = f"{database}.{schema_name}.{table_name}"
 
     def _write_iceberg():
         try:
@@ -127,7 +127,7 @@ async def materialize(
     await asyncio.to_thread(_write_iceberg)
 
     # Register in PostgreSQL catalog
-    schema_id = await _ensure_db_and_schema(database, schema)
+    schema_id = await _ensure_db_and_schema(database, schema_name)
     async with async_session() as session:
         existing_result = await session.execute(
             select(CatalogObject).where(
