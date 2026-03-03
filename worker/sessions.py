@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import tempfile
@@ -7,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import duckdb
+import pyarrow.ipc as ipc
 
 from executor import setup_connection
 
@@ -98,6 +100,24 @@ class SessionManager:
                     }
             except Exception as exc:
                 return {"status": "failed", "error": str(exc)}
+
+    def export_arrow(self, session_id: str, table_name: str) -> bytes:
+        """Export a table from the session as Arrow IPC stream bytes."""
+        session = self.get(session_id)
+        if session is None:
+            raise KeyError(f"Session {session_id} not found")
+
+        with session.lock:
+            session.last_used_at = time.time()
+            # table_name is expected as "schema"."name"
+            result = session.conn.execute(f"SELECT * FROM {table_name}")
+            arrow_table = result.fetch_arrow_table()
+
+        sink = io.BytesIO()
+        writer = ipc.new_stream(sink, arrow_table.schema)
+        writer.write_table(arrow_table)
+        writer.close()
+        return sink.getvalue()
 
     def keepalive(self, session_id: str) -> bool:
         session = self.get(session_id)

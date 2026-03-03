@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 import duckdb
@@ -174,6 +175,10 @@ class SessionQueryRequest(BaseModel):
     fetch_results: bool = True
 
 
+class ExportArrowRequest(BaseModel):
+    table: str  # e.g. '"schema"."name"'
+
+
 # --- Session endpoints ---
 
 
@@ -208,6 +213,17 @@ async def close_session(session_id: str, _auth: Authenticated):
     if not session_manager.close(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "closed"}
+
+
+@app.post("/session/{session_id}/export-arrow")
+async def export_arrow(session_id: str, req: ExportArrowRequest, _auth: Authenticated):
+    if session_manager.get(session_id) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    loop = asyncio.get_running_loop()
+    arrow_bytes = await loop.run_in_executor(
+        None, session_manager.export_arrow, session_id, req.table,
+    )
+    return Response(content=arrow_bytes, media_type="application/vnd.apache.arrow.stream")
 
 
 @app.post("/session/{session_id}/keepalive")
