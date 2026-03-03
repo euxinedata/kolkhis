@@ -172,25 +172,41 @@
 }
 
 /* Full-height layouts: remove padding, fill height */
-.app-main:has(.query-layout),
+.app-main:has(.query-outer),
 .app-main:has(.project-editor) {
   padding: 0;
   overflow: hidden;
 }
 
-.query-layout {
+.query-outer {
   display: flex;
-  gap: 0;
+  flex-direction: column;
   height: calc(100vh - 2.5em);
 }
 
+.query-layout {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
 .catalog-sidebar {
-  width: 280px;
-  min-width: 280px;
   border-right: 1px solid #2a2a4a;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex-shrink: 0;
+}
+
+.catalog-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: #2a2a4a;
+  flex-shrink: 0;
+}
+.catalog-resize-handle:hover {
+  background: #646cff;
 }
 
 .catalog-sidebar-header {
@@ -246,12 +262,22 @@
   flex-direction: column;
 }
 
+.results-resize-handle {
+  height: 4px;
+  cursor: row-resize;
+  background: #2a2a4a;
+  flex-shrink: 0;
+}
+.results-resize-handle:hover {
+  background: #646cff;
+}
+
 .results-panel {
-  max-height: 33vh;
-  border-top: 1px solid #2a2a4a;
+  border-top: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .results-header {
@@ -532,6 +558,42 @@
   margin-top: 1em;
 }
 
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 0.5em;
+  background: #181830;
+  border-top: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  font-size: 0.72em;
+  font-family: monospace;
+  color: #888;
+  user-select: none;
+}
+
+.status-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status-bar-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
 @media (prefers-color-scheme: light) {
   .app-nav {
     border-bottom-color: #e0e0ea;
@@ -571,6 +633,12 @@
   }
   .catalog-sidebar {
     border-right-color: #e0e0ea;
+  }
+  .catalog-resize-handle {
+    background: #e0e0ea;
+  }
+  .catalog-resize-handle:hover {
+    background: #4a50c8;
   }
   .catalog-sidebar-header {
     border-bottom-color: #e0e0ea;
@@ -631,8 +699,16 @@
   .object-detail-columns td {
     border-bottom-color: #eeeef5;
   }
-  .results-panel {
+  .results-resize-handle {
+    background: #e0e0ea;
+  }
+  .results-resize-handle:hover {
+    background: #4a50c8;
+  }
+  .status-bar {
+    background: #f0f0f5;
     border-top-color: #e0e0ea;
+    color: #666;
   }
   .results-close:hover {
     color: #213547;

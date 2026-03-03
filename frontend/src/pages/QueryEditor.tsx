@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Editor, type Monaco } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -206,6 +206,8 @@ export function QueryEditor() {
   const [startedAt, setStartedAt] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState<string | null>(null)
   const [catalogOpen, setCatalogOpen] = useState(true)
+  const [catalogWidth, setCatalogWidth] = useState(280)
+  const [resultsHeight, setResultsHeight] = useState(250)
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const submitRef = useRef<() => void>(() => {})
@@ -376,24 +378,60 @@ export function QueryEditor() {
     if (activeTab === tabId) setActiveTab('__query__')
   }
 
+  const handleResultsResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = resultsHeight
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY
+      setResultsHeight(Math.max(100, Math.min(600, startHeight + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [resultsHeight])
+
+  const handleCatalogResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = catalogWidth
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      setCatalogWidth(Math.max(140, Math.min(500, startWidth + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [catalogWidth])
+
   const totalPages = result ? Math.ceil(result.total / result.page_size) : 0
 
   return (
+    <div className="query-outer">
     <div className="query-layout">
       {catalogOpen && (
-        <aside className="catalog-sidebar">
-          <div className="catalog-sidebar-header">
-            <span className="catalog-sidebar-title">Catalog</span>
-            <button
-              className="catalog-toggle"
-              onClick={() => setCatalogOpen(false)}
-              title="Hide catalog"
-            >
-              ✕
-            </button>
-          </div>
-          <CatalogPanel refreshKey={catalogRefreshKey} onSelectObject={handleSelectObject} />
-        </aside>
+        <>
+          <aside className="catalog-sidebar" style={{ width: catalogWidth, minWidth: catalogWidth }}>
+            <div className="catalog-sidebar-header">
+              <span className="catalog-sidebar-title">Catalog</span>
+              <button
+                className="catalog-toggle"
+                onClick={() => setCatalogOpen(false)}
+                title="Hide catalog"
+              >
+                ✕
+              </button>
+            </div>
+            <CatalogPanel refreshKey={catalogRefreshKey} onSelectObject={handleSelectObject} />
+          </aside>
+          <div className="catalog-resize-handle" onMouseDown={handleCatalogResizeMouseDown} />
+        </>
       )}
       <div className="query-main">
         {/* Tab bar */}
@@ -435,7 +473,7 @@ export function QueryEditor() {
                   </button>
                 </div>
               )}
-              <div style={{ flex: 1, minHeight: 0, border: '1px solid #444', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 <Editor
                   height="100%"
                   language="sql"
@@ -453,7 +491,7 @@ export function QueryEditor() {
                   }}
                 />
               </div>
-              <div style={{ display: 'flex', gap: '1em', padding: '1em 0', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: '1em', padding: '0.4em 0 0.4em 0.5em', alignItems: 'center', flexShrink: 0 }}>
                 {status === 'pending' || status === 'provisioning' || status === 'running' ? (
                   <button onClick={handleCancel}>Cancel</button>
                 ) : (
@@ -467,12 +505,23 @@ export function QueryEditor() {
                   </span>
                 )}
                 {jobId && status === 'completed' && (
-                  <a
-                    href={`${API_URL}/api/queries/${jobId}/export`}
-                    style={{ fontSize: '0.85em' }}
-                  >
-                    Download CSV
-                  </a>
+                  <>
+                    <a
+                      href={`${API_URL}/api/queries/${jobId}/export`}
+                      style={{ fontSize: '0.85em' }}
+                    >
+                      Download CSV
+                    </a>
+                    {!result && (
+                      <a
+                        href="#"
+                        style={{ fontSize: '0.85em' }}
+                        onClick={e => { e.preventDefault(); fetchResults(jobId, 0) }}
+                      >
+                        Show Results
+                      </a>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -484,7 +533,9 @@ export function QueryEditor() {
             )}
 
             {result && (
-              <div className="results-panel">
+              <>
+              <div className="results-resize-handle" onMouseDown={handleResultsResizeMouseDown} />
+              <div className="results-panel" style={{ height: resultsHeight }}>
                 <div className="results-header">
                   <span>{result.total} rows</span>
                   <button className="results-close" onClick={() => setResult(null)} title="Close results">✕</button>
@@ -519,6 +570,7 @@ export function QueryEditor() {
                   </button>
                 </div>
               </div>
+              </>
             )}
           </>
         )}
@@ -536,6 +588,21 @@ export function QueryEditor() {
           )
         ))}
       </div>
+    </div>
+    <div className="status-bar">
+      <div className="status-bar-left">
+        <span className="status-bar-item">
+          {openTabs.find(t => t.id === activeTab)?.id === '__query__'
+            ? 'Query'
+            : activeTab}
+        </span>
+      </div>
+      <div className="status-bar-right">
+        {status && (
+          <span className={`status-bar-item status-${status}`}>{status}</span>
+        )}
+      </div>
+    </div>
     </div>
   )
 }
