@@ -18,6 +18,59 @@ def cancel(job_id: str) -> bool:
     return True
 
 
+def setup_connection(
+    conn: duckdb.DuckDBPyConnection,
+    catalog_objects: list[dict],
+    s3_endpoint: str,
+    s3_access_key: str,
+    s3_secret_key: str,
+    s3_region: str,
+) -> None:
+    """Load extensions, configure S3, and register catalog objects on a DuckDB connection."""
+    conn.install_extension("iceberg")
+    conn.load_extension("iceberg")
+    conn.install_extension("httpfs")
+    conn.load_extension("httpfs")
+
+    use_ssl = "true" if s3_endpoint.startswith("https://") else "false"
+    bare_endpoint = s3_endpoint.replace("http://", "").replace("https://", "")
+    conn.execute(f"""
+        CREATE SECRET (
+            TYPE S3,
+            KEY_ID '{s3_access_key}',
+            SECRET '{s3_secret_key}',
+            REGION '{s3_region}',
+            ENDPOINT '{bare_endpoint}',
+            URL_STYLE 'path',
+            USE_SSL {use_ssl}
+        )
+    """)
+
+    created_schemas: set[str] = set()
+    sorted_objects = sorted(
+        catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1
+    )
+
+    for obj in sorted_objects:
+        schema = obj["duckdb_schema"]
+        if schema not in created_schemas:
+            conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            created_schemas.add(schema)
+
+        if obj["object_type"] == "table" and obj.get("metadata_location"):
+            conn.execute(
+                f'CREATE VIEW "{schema}"."{obj["name"]}" AS '
+                f"SELECT * FROM iceberg_scan('{obj['metadata_location']}')"
+            )
+        elif obj["object_type"] == "view" and obj.get("view_sql"):
+            try:
+                conn.execute(
+                    f'CREATE VIEW "{schema}"."{obj["name"]}" AS {obj["view_sql"]}'
+                )
+            except duckdb.Error:
+                pass
+
+
 def execute_query(
     job_id: str,
     sql: str,
@@ -39,48 +92,10 @@ def execute_query(
     _running_conns[job_id] = conn
 
     try:
-        conn.install_extension("iceberg")
-        conn.load_extension("iceberg")
-        conn.install_extension("httpfs")
-        conn.load_extension("httpfs")
-
-        use_ssl = "true" if s3_endpoint.startswith("https://") else "false"
-        bare_endpoint = s3_endpoint.replace("http://", "").replace("https://", "")
-        conn.execute(f"""
-            CREATE SECRET (
-                TYPE S3,
-                KEY_ID '{s3_access_key}',
-                SECRET '{s3_secret_key}',
-                REGION '{s3_region}',
-                ENDPOINT '{bare_endpoint}',
-                URL_STYLE 'path',
-                USE_SSL {use_ssl}
-            )
-        """)
-
-        created_schemas: set[str] = set()
-        sorted_objects = sorted(
-            catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1
+        setup_connection(
+            conn, catalog_objects,
+            s3_endpoint, s3_access_key, s3_secret_key, s3_region,
         )
-
-        for obj in sorted_objects:
-            schema = obj["duckdb_schema"]
-            if schema not in created_schemas:
-                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-                created_schemas.add(schema)
-
-            if obj["object_type"] == "table" and obj.get("metadata_location"):
-                conn.execute(
-                    f'CREATE VIEW "{schema}"."{obj["name"]}" AS '
-                    f"SELECT * FROM iceberg_scan('{obj['metadata_location']}')"
-                )
-            elif obj["object_type"] == "view" and obj.get("view_sql"):
-                try:
-                    conn.execute(
-                        f'CREATE VIEW "{schema}"."{obj["name"]}" AS {obj["view_sql"]}'
-                    )
-                except duckdb.Error:
-                    pass
 
         sql = sql.strip().rstrip(";").strip()
         if not re.search(
