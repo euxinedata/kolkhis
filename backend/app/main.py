@@ -24,6 +24,7 @@ from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
 from app.routers.settings import router as settings_router
 from app.routers.projects import router as projects_router
+from app.routers.terminal import router as terminal_router
 from app.routers.workers import router as workers_router
 
 
@@ -83,6 +84,7 @@ app.include_router(catalog_router)
 app.include_router(projects_router)
 app.include_router(queries_router)
 app.include_router(settings_router)
+app.include_router(terminal_router)
 app.include_router(workers_router)
 
 

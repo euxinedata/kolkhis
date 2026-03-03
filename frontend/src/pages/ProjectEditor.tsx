@@ -15,6 +15,7 @@ import type {
 } from 'react-complex-tree'
 import 'react-complex-tree/lib/style-modern.css'
 import { apiFetch } from '../api'
+import Terminal from '../components/Terminal'
 import './ProjectEditor.css'
 
 interface Project {
@@ -1018,7 +1019,18 @@ export function ProjectEditor() {
                   <button className="terminal-tab-add" onClick={addTerminal}>+</button>
                 </div>
                 <div className="terminal-content">
-                  $ (not connected)
+                  {terminalTabs.map(tab => (
+                    <div key={tab.id} style={{
+                      display: tab.id === activeTerminalTab ? 'block' : 'none',
+                      width: '100%', height: '100%',
+                    }}>
+                      <Terminal
+                        projectId={projectId!}
+                        tabId={tab.id}
+                        visible={tab.id === activeTerminalTab}
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
             </>

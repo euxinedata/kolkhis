@@ -404,11 +404,7 @@
 .terminal-content {
   flex: 1;
   background: #0e0e1a;
-  color: #666;
-  font-family: monospace;
-  font-size: 0.85em;
-  padding: 0.5em;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .file-editor-empty {

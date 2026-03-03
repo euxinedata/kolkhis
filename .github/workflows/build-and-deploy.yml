@@ -7,6 +7,7 @@ on:
 env:
   BACKEND_IMAGE: ghcr.io/euxinedata/kolkhis-backend
   FRONTEND_IMAGE: ghcr.io/euxinedata/kolkhis-frontend
+  SHELL_IMAGE: ghcr.io/euxinedata/kolkhis-shell
 
 jobs:
   build-and-deploy:
@@ -40,6 +41,12 @@ jobs:
           docker build -t $FRONTEND_IMAGE:$SHA -t $FRONTEND_IMAGE:latest frontend/
           docker push $FRONTEND_IMAGE:$SHA
           docker push $FRONTEND_IMAGE:latest
+
+      - name: Build and push shell
+        run: |
+          docker build -t $SHELL_IMAGE:$SHA -t $SHELL_IMAGE:latest shell/
+          docker push $SHELL_IMAGE:$SHA
+          docker push $SHELL_IMAGE:latest
 
       - name: Update image tags in pontus
         run: |

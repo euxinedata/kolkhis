@@ -36,6 +36,9 @@ backend/data/
 # MCP config
 .mcp.json
 
+# Shell pod SSH keys
+shell/keys/
+
 # OS
 .DS_Store
 Thumbs.db

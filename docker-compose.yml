@@ -77,6 +77,14 @@ services:
       gitea admin user create --username ${GITEA_ADMIN_USER:-kolkhis-admin} --password ${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026} --email ${GITEA_ADMIN_EMAIL:-admin@kolkhis.local} --admin"
     restart: "no"
 
+  shell:
+    build: ./shell
+    ports:
+      - "2222:22"
+    volumes:
+      - ./backend/data/projects:/home/shelluser/projects
+      - ./shell/keys/id_ed25519.pub:/home/shelluser/.ssh/authorized_keys:ro
+
 volumes:
   pgdata:
   minio-data:

@@ -72,3 +72,9 @@ GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")
 GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
 GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 PROJECTS_PATH = os.environ.get("PROJECTS_PATH", "./data/projects")
+
+# Shell pod SSH configuration
+SHELL_SSH_HOST = os.environ.get("SHELL_SSH_HOST", "localhost")
+SHELL_SSH_PORT = int(os.environ.get("SHELL_SSH_PORT", "2222"))
+SHELL_SSH_USER = os.environ.get("SHELL_SSH_USER", "shelluser")
+SHELL_SSH_KEY_PATH = os.environ.get("SHELL_SSH_KEY_PATH", str(Path(__file__).resolve().parent.parent.parent / "shell" / "keys" / "id_ed25519"))
