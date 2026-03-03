@@ -1,0 +1,276 @@
+.project-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Header bar */
+.project-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.4em 0.75em;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+}
+
+.project-back-btn {
+  background: none;
+  border: none;
+  color: #8888bb;
+  font-size: 0.82em;
+  cursor: pointer;
+  padding: 0.2em 0.4em;
+}
+
+.project-back-btn:hover {
+  color: #646cff;
+  background: none;
+  border: none;
+}
+
+.project-editor-name {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: #ccc;
+}
+
+/* Body: file tree + editor */
+.project-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* File tree panel */
+.file-tree-panel {
+  width: 240px;
+  min-width: 240px;
+  border-right: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-tree-title {
+  font-size: 0.75em;
+  font-weight: 600;
+  color: #8888bb;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.file-tree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25em 0;
+}
+
+/* --- react-complex-tree: dark theme overrides --- */
+
+/*
+ * CSS variable inheritance: :root sets defaults in style.css / style-modern.css.
+ * We override on .rct-tree-root so all children inherit our dark values.
+ *
+ * style.css uses these variables:
+ *   --rct-color-tree-bg                      → .rct-tree-root background
+ *   --rct-color-tree-focus-outline            → .rct-tree-root-focus outline
+ *   --rct-color-focustree-item-selected-bg    → selected item bg (tree focused)
+ *   --rct-color-focustree-item-selected-text  → selected item text (tree focused)
+ *   --rct-color-focustree-item-focused-border → focused item border-color (the blue border)
+ *   --rct-color-nonfocustree-item-*           → same when tree is not focused
+ *   --rct-color-arrow                         → arrow SVG fill
+ *
+ * style-modern.css adds:
+ *   --rct-bar-color / --rct-bar-width         → left accent bar on selected items (::before)
+ *   --rct-focus-outline                       → button :focus-visible outline
+ *   --rct-color-focustree-item-hover-bg/text  → hover state
+ *   --rct-color-focustree-item-active-bg/text → active (mousedown) state
+ *   --rct-radius, --rct-item-height, etc.
+ */
+
+.file-tree-list .rct-tree-root {
+  font-size: 0.82em;
+  font-family: monospace;
+
+  /* Tree container */
+  --rct-color-tree-bg: transparent;
+  --rct-color-tree-focus-outline: transparent;
+
+  /* Selected item (tree focused) */
+  --rct-color-focustree-item-selected-bg: #2a2a4a;
+  --rct-color-focustree-item-selected-text: #646cff;
+  --rct-color-focustree-item-focused-border: transparent;  /* removes the blue border */
+
+  /* Selected item (tree not focused) */
+  --rct-color-nonfocustree-item-selected-bg: #22223a;
+  --rct-color-nonfocustree-item-selected-text: #8888bb;
+  --rct-color-nonfocustree-item-focused-border: transparent;
+
+  /* Hover / active */
+  --rct-color-focustree-item-hover-bg: #1e1e3a;
+  --rct-color-focustree-item-hover-text: inherit;
+  --rct-color-focustree-item-active-bg: #1e1e3a;
+  --rct-color-focustree-item-active-text: inherit;
+
+  /* Arrow */
+  --rct-color-arrow: #666;
+
+  /* style-modern.css: left accent bar on selected items */
+  --rct-bar-color: #3a3a5a;
+  --rct-bar-width: 2px;
+
+  /* style-modern.css: focus-visible outline on button */
+  --rct-focus-outline: transparent;
+
+  /* Sizing */
+  --rct-item-height: 28px;
+}
+
+/* Direct overrides — CSS variables on .rct-tree-root don't cascade to
+   selectors that resolve var() from :root. Override the actual properties. */
+
+/* Remove the blue focused border (style.css line 98-104) */
+.file-tree-list .rct-tree-item-title-container-focused {
+  border-color: transparent !important;
+}
+
+/* Remove the tree-level focus outline (style.css line 37) */
+.file-tree-list .rct-tree-root-focus {
+  outline: none;
+}
+
+/* Remove the button focus/focus-visible outline (global index.css + style-modern.css) */
+.file-tree-list .rct-tree-item-button:focus,
+.file-tree-list .rct-tree-item-button:focus-visible {
+  outline: none;
+}
+
+/* Tame the left accent bar on selected items (style-modern.css ::before) */
+.file-tree-list .rct-tree-item-title-container-selected .rct-tree-item-button::before {
+  background-color: #3a3a5a;
+  width: 2px;
+}
+
+/* File tree icons */
+.file-tree-title-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.file-tree-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Editor panel */
+.file-editor-panel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-editor-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #555;
+  font-size: 0.9em;
+}
+
+/* Context menu */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #1e1e3a;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 0.25em 0;
+  min-width: 140px;
+  font-size: 0.82em;
+  font-family: monospace;
+}
+
+.context-menu-item {
+  padding: 0.35em 0.75em;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: #2a2a4a;
+  color: #fff;
+}
+
+/* Highlight on right-clicked node */
+.context-target {
+  background: #2a2a4a;
+}
+
+/* VCS status colors (PyCharm dark convention) */
+.vcs-new {
+  color: #629755 !important;
+}
+
+.vcs-modified {
+  color: #6897bb !important;
+}
+
+.vcs-deleted {
+  color: #9e6054 !important;
+  text-decoration: line-through;
+}
+
+.vcs-dir-changed {
+  color: #807e6e !important;
+}
+
+/* Light mode */
+@media (prefers-color-scheme: light) {
+  .project-editor-header {
+    border-bottom-color: #e0e0ea;
+  }
+  .project-editor-name {
+    color: #333;
+  }
+  .file-tree-panel {
+    border-right-color: #e0e0ea;
+  }
+  .file-tree-title {
+    border-bottom-color: #e0e0ea;
+  }
+  .context-menu {
+    background: #fff;
+    border-color: #d0d0dd;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  }
+  .context-menu-item {
+    color: #333;
+  }
+  .context-menu-item:hover {
+    background: #eeeef5;
+    color: #111;
+  }
+  .context-target {
+    background: #eeeef5;
+  }
+  .vcs-new {
+    color: #4a7a3a !important;
+  }
+  .vcs-modified {
+    color: #4a78a0 !important;
+  }
+  .vcs-deleted {
+    color: #8b4a3a !important;
+  }
+  .vcs-dir-changed {
+    color: #6b6950 !important;
+  }
+}

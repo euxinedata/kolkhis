@@ -30,6 +30,12 @@ node_modules/
 # DuckDB temp storage
 backend/.tmp/
 
+# Local project clones
+backend/data/
+
+# MCP config
+.mcp.json
+
 # OS
 .DS_Store
 Thumbs.db

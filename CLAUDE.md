@@ -9,13 +9,18 @@ Kolkhis is a full-stack web application with a Python/FastAPI backend and a Reac
 ## Architecture
 
 - **`backend/`** — FastAPI app with async SQLAlchemy (asyncpg driver) and Alembic migrations
-  - `app/main.py` — FastAPI app with lifespan handler (auto-creates tables and seeds data on startup)
+  - `app/main.py` — FastAPI app with lifespan handler (creates tables, seeds data, bootstraps Gitea token, manages workers on startup)
   - `app/models.py` — SQLAlchemy ORM models using `DeclarativeBase` and `Mapped` typed columns
-  - `app/database.py` — Async engine and session factory
+  - `app/database.py` — Async engine, session factory, and `get_db` FastAPI dependency
   - `app/config.py` — All configuration, loaded from project root `.env` file
+  - `app/auth.py` — Google OAuth login, JWT token management, cookie handling
+  - `app/billing.py` — Billing summary computation from usage events and server type rates
+  - `app/warehouse.py` — PyIceberg `SqlCatalog` initialization with S3 config
+  - `app/gitea.py` — Async Gitea REST API client (repos, files, branches, PRs, token bootstrap)
   - `app/query_engine.py` — Query execution engine with three worker modes (see below)
   - `app/worker_manager.py` — Hetzner VM provisioning (remote mode only)
-  - `app/seed.py` — Seeds countries table from `pycountry` on first run
+  - `app/seed.py` — Seeds countries, server type rates, and catalog objects on first run
+  - `app/routers/` — API route modules: `billing.py`, `catalog.py`, `queries.py`, `settings.py`, `workers.py`
   - `alembic/` — Migration scripts; `env.py` reads `DATABASE_URL` (uses `psycopg2` sync driver for migrations)
 - **`worker/`** — Standalone DuckDB query worker service (FastAPI)
   - `app.py` — HTTP endpoints: `POST /query`, `GET /query/{id}`, `POST /query/{id}/cancel`
@@ -80,9 +85,21 @@ npm run build         # TypeScript check + Vite production build
 npm run lint          # ESLint
 ```
 
+## Local Development (docker-compose)
+
+`docker-compose.yml` provides the local infrastructure. Run `docker compose up -d` to start all services:
+
+- **`db`** — PostgreSQL 17 (port `5437`)
+- **`minio`** / **`minio-init`** — S3-compatible object storage (ports `9000`/`9001`) + bucket creation
+- **`gitea-init`** — Creates the `gitea` database in PostgreSQL
+- **`gitea`** — Gitea 1.23 rootless (port `3000`), uses PostgreSQL for its own data
+- **`gitea-setup`** — Creates the admin user (`kolkhis-admin`) via CLI after Gitea starts
+
+Gitea env vars in `.env`: `GITEA_URL`, `GITEA_ADMIN_USER`, `GITEA_ADMIN_PASSWORD`, `GITEA_ADMIN_EMAIL`. On backend startup, `bootstrap_token()` creates a Gitea API token for the admin user.
+
 ## Database
 
-PostgreSQL is required. Default connection: `euxine:very_secure_password@localhost:5437/euxine`. Override individual parts with `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` env vars. The app auto-creates tables and seeds country data on startup, so Alembic migrations are optional for dev.
+PostgreSQL is required. Default connection: `euxine:very_secure_password@localhost:5437/euxine`. Override individual parts with `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` env vars. The app auto-creates tables and seeds data on startup, so Alembic migrations are optional for dev.
 
 The `iceberg_tables` and `iceberg_namespace_properties` tables are managed by PyIceberg's SQL catalog and store Iceberg table metadata locations. The `catalog_objects`, `databases`, and `schemas` tables map the user-facing three-part naming (`database.schema.table`) to Iceberg identifiers.
 

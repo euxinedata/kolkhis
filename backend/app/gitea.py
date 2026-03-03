@@ -73,6 +73,15 @@ async def create_repo(name: str) -> dict:
         return resp.json()
 
 
+async def delete_repo(name: str) -> None:
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            _api(f"/repos/{GITEA_ADMIN_USER}/{name}"),
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+
+
 async def list_repos() -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(
@@ -105,7 +114,7 @@ async def create_or_update_file(
     encoded = base64.b64encode(content.encode()).decode()
     payload: dict = {"content": encoded, "message": message, "branch": branch}
 
-    # Try to get existing file SHA for update
+    # Check if file exists to decide POST (create) vs PUT (update)
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
@@ -114,8 +123,11 @@ async def create_or_update_file(
         )
         if resp.status_code == 200:
             payload["sha"] = resp.json()["sha"]
+            method = client.put
+        else:
+            method = client.post
 
-        resp = await client.put(
+        resp = await method(
             _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
             headers=_headers(),
             json=payload,
