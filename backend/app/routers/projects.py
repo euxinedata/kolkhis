@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
+from app.config import WORKER_AUTH_TOKEN
 from app.database import get_db
 from app.gitea import create_repo, create_or_update_file, delete_repo
 from app.models import Project
@@ -29,14 +30,22 @@ model-paths: ["models"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
+
+dispatch:
+  - macro_namespace: dbt
+    search_order: ['kolkhis', '{name}', 'dbt']
 """,
     "profiles.yml": """\
 '{name}':
   target: dev
   outputs:
     dev:
-      type: duckdb
-      path: ':memory:'
+      type: kolkhis
+      backend_url: http://host.docker.internal:8000
+      worker_url: http://host.docker.internal:8080
+      auth_token: '{worker_auth_token}'
+      database: kolkhis
+      schema: main
 """,
 }
 
@@ -132,7 +141,8 @@ async def create_project(
 
     # Commit dbt scaffold via Gitea API (so initial clone is clean)
     for path, content in DBT_SCAFFOLD.items():
-        rendered = content.replace("{name}", body.name)
+        dbt_name = body.name.replace("-", "_")
+        rendered = content.replace("{name}", dbt_name).replace("{worker_auth_token}", WORKER_AUTH_TOKEN)
         await create_or_update_file(repo_name, path, rendered, f"Add {path}")
 
     # Clone locally and create dbt directories
