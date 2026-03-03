@@ -59,8 +59,12 @@ async def clone_repo(shell_username: str, repo_name: str, user_name: str = "", u
 
 
 async def ensure_clone(shell_username: str, repo_name: str, user_name: str = "", user_email: str = "") -> None:
-    if not _repo_path(shell_username, repo_name).exists():
+    dest = _repo_path(shell_username, repo_name)
+    if not dest.exists():
         await clone_repo(shell_username, repo_name, user_name, user_email)
+    else:
+        # Update remote URL so the token stays current after backend restarts
+        await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name), cwd=dest)
 
 
 def remove_repo(shell_username: str, repo_name: str) -> None:
