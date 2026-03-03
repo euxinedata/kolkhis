@@ -1,0 +1,36 @@
+name: Build Shell
+
+on:
+  push:
+    branches: [main]
+    paths: ['shell/**']
+
+env:
+  SHELL_IMAGE: ghcr.io/euxinedata/kolkhis-shell
+
+jobs:
+  build-shell:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tag
+        run: echo "SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_ENV
+
+      - name: Build and push shell
+        run: |
+          docker build -t $SHELL_IMAGE:$SHA -t $SHELL_IMAGE:latest shell/
+          docker push $SHELL_IMAGE:$SHA
+          docker push $SHELL_IMAGE:latest
