@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import (
-    JWT_SECRET, FRONTEND_URL, RESULTS_PATH, PROJECTS_PATH, WAREHOUSE_PATH,
+    JWT_SECRET, FRONTEND_URL, RESULTS_PATH, HOMES_PATH, WAREHOUSE_PATH,
     WORKER_MODE, GITEA_ADMIN_PASSWORD, is_s3_warehouse,
 )
 from app.database import engine, async_session, get_db
@@ -31,7 +31,7 @@ from app.routers.workers import router as workers_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(RESULTS_PATH, exist_ok=True)
-    os.makedirs(PROJECTS_PATH, exist_ok=True)
+    os.makedirs(HOMES_PATH, exist_ok=True)
     if not is_s3_warehouse():
         os.makedirs(WAREHOUSE_PATH, exist_ok=True)
     async with engine.begin() as conn:

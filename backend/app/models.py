@@ -27,6 +27,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     name: Mapped[str] = mapped_column(String(255))
     picture_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    shell_username: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -131,9 +132,11 @@ class ServerTypeRate(Base):
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     gitea_repo_name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

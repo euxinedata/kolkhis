@@ -19,14 +19,90 @@ Kolkhis is a full-stack web application with a Python/FastAPI backend and a Reac
   - `app/gitea.py` — Async Gitea REST API client (repos, files, branches, PRs, token bootstrap)
   - `app/query_engine.py` — Query execution engine with three worker modes (see below)
   - `app/worker_manager.py` — Hetzner VM provisioning (remote mode only)
+  - `app/shell.py` — Shell container user provisioning (generate username, create Linux account via SSH)
+  - `app/workspace.py` — Local git working copy + filesystem operations (clone, list, read, write, rename, delete, git status)
   - `app/seed.py` — Seeds countries, server type rates, and catalog objects on first run
-  - `app/routers/` — API route modules: `billing.py`, `catalog.py`, `queries.py`, `settings.py`, `workers.py`
+  - `app/routers/` — API route modules: `billing.py`, `catalog.py`, `projects.py`, `queries.py`, `settings.py`, `terminal.py`, `workers.py`
   - `alembic/` — Migration scripts; `env.py` reads `DATABASE_URL` (uses `psycopg2` sync driver for migrations)
 - **`worker/`** — Standalone DuckDB query worker service (FastAPI)
   - `app.py` — HTTP endpoints: `POST /query`, `GET /query/{id}`, `POST /query/{id}/cancel`
   - `executor.py` — DuckDB execution: registers Iceberg tables via S3, writes results to parquet
   - `config.py` — Worker config, loaded from project root `.env` file
+- **`shell/`** — Shared SSH container for user terminals
+  - `Dockerfile` — Python 3.12-slim with sshd, git, dbt-core, sqlfluff; creates `shelluser` admin account
+  - `entrypoint.sh` — Ensures `shelluser` home dir exists on volume mount, starts sshd
+  - `keys/` — SSH keypair used by the backend to connect to the shell container
 - **`frontend/`** — React 19 + TypeScript + Vite 7
+  - `src/pages/ProjectEditor.tsx` — Project editor: file tree (react-complex-tree), Monaco editor with tabs, terminal panel
+  - `src/pages/Engineering.tsx` — Project list and creation
+  - `src/pages/QueryEditor.tsx` — SQL query editor
+  - `src/components/Terminal.tsx` — xterm.js terminal with WebSocket bridge to shell container
+  - `src/components/CatalogPanel.tsx` — Database/schema/table browser
+
+## Shell Container (Multi-User Terminals)
+
+A single shell container runs `sshd` and provides per-user terminal sessions. Each user gets their own Linux account and home directory.
+
+### How It Works
+
+1. **Shared `/home` mount**: The container's `/home` is bind-mounted from `./backend/data/homes` on the host. The backend and shell container see the same filesystem.
+2. **Admin account**: `shelluser` is created at image build time with limited `sudo` rights (useradd, mkdir, cp, chown, id). The backend's SSH public key is mounted as its `authorized_keys`.
+3. **User provisioning** (`app/shell.py`): On first terminal open, `ensure_shell_user()` derives a Linux username from the user's email, creates the account via SSH commands run as `shelluser`, and saves the `shell_username` on the `User` model. It creates `~/.ssh`, `~/.dbt`, and `~/projects` directories, copies skel files, and copies the backend's SSH key so it can later connect as that user.
+4. **Terminal sessions** (`app/routers/terminal.py`): The WebSocket endpoint authenticates via JWT cookie, then SSHes into the shell container **as the user's own account** with `term_type="xterm-256color"`. It auto-cds into `~/projects/{repo_name}`.
+5. **File operations** (`app/workspace.py`): The backend reads/writes project files directly on the host at `HOMES_PATH/{shell_username}/projects/{repo_name}` — the same files the shell user sees via the bind mount.
+
+### Key Design Points
+
+- Per-user home directories enable user-specific config files (`~/.dbt/profiles.yml`, etc.)
+- Users are isolated at the Linux user level with standard file permissions
+- The `/home` mount is shared, so users can see other users' home directories (read access depends on permissions)
+- `shell_username` is persisted in PostgreSQL with a unique constraint; collisions append `-{user_id}`
+
+### Configuration
+
+Env vars in `.env`:
+- `SHELL_SSH_HOST` — Shell container hostname (default: `localhost`)
+- `SHELL_SSH_PORT` — SSH port (default: `2222`)
+- `SHELL_SSH_USER` — Admin account for provisioning (default: `shelluser`)
+- `SHELL_SSH_KEY_PATH` — Path to SSH private key (default: `shell/keys/id_ed25519`)
+- `HOMES_PATH` — Host path to the shared `/home` mount (default: `./data/homes`)
+
+## Projects and Project Editor
+
+Projects are dbt projects backed by Gitea git repositories. Each project maps to a Gitea repo under the admin user.
+
+### Project Lifecycle
+
+1. **Create**: `POST /api/projects` creates a Gitea repo, commits a dbt scaffold (`dbt_project.yml`, `profiles.yml`), clones it into the user's home directory, and creates the standard dbt directories (`macros`, `models`, `seeds`, `tests`).
+2. **Edit**: The project editor (`ProjectEditor.tsx`) provides a file tree, Monaco code editor with tabs, and a terminal panel.
+3. **Delete**: `DELETE /api/projects/{id}` deletes the Gitea repo, removes the local clone, and deletes the DB row.
+
+### File Tree
+
+Uses **react-complex-tree** (`UncontrolledTreeEnvironment` + custom `FileTreeDataProvider`). Directories are lazy-loaded via `GET /api/projects/{id}/files?path=...`. Supports context menu operations: new file, new folder, rename, delete.
+
+### Editor Tabs
+
+Each open file gets a tab. Tab model: `OpenTab { path, content, savedContent }` — dirty detection via `content !== savedContent`. Monaco's `path` prop gives per-file undo history. Ctrl/Cmd+S saves via `POST /api/projects/{id}/files`.
+
+### Terminal Panel
+
+Collapsible panel at the bottom with multiple terminal tabs. Each tab creates a WebSocket to `ws://.../api/projects/{id}/terminal` which bridges to an SSH session in the shell container. Uses xterm.js with a dark theme. Supports resize events. State (open/closed, active tab, height) persisted to localStorage.
+
+### File API Endpoints
+
+All under `/api/projects/{project_id}/`:
+- `GET /files?path=` — list directory
+- `GET /file?path=` — read file content
+- `POST /files` — create/write file
+- `POST /folders` — create directory
+- `POST /rename` — rename file/folder
+- `DELETE /files` — delete file/folder
+- `GET /status` — git status (porcelain)
+
+### Configuration
+
+- `GITEA_SHELL_URL` — Gitea URL as seen from the shell container (defaults to `GITEA_URL`). Used for git remote URLs so that terminals can push/pull.
 
 ## Worker Modes
 
@@ -94,6 +170,7 @@ npm run lint          # ESLint
 - **`gitea-init`** — Creates the `gitea` database in PostgreSQL
 - **`gitea`** — Gitea 1.23 rootless (port `3000`), uses PostgreSQL for its own data
 - **`gitea-setup`** — Creates the admin user (`kolkhis-admin`) via CLI after Gitea starts
+- **`shell`** — SSH container for user terminals (port `2222`); `/home` bind-mounted from `./backend/data/homes`
 
 Gitea env vars in `.env`: `GITEA_URL`, `GITEA_ADMIN_USER`, `GITEA_ADMIN_PASSWORD`, `GITEA_ADMIN_EMAIL`. On backend startup, `bootstrap_token()` creates a Gitea API token for the admin user.
 
