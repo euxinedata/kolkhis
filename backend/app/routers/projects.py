@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -96,6 +97,10 @@ async def create_project(
     repo_name = body.name.lower().replace(" ", "-")
     try:
         await create_repo(repo_name)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 409:
+            raise HTTPException(status_code=409, detail=f"Project '{body.name}' already exists")
+        raise HTTPException(status_code=502, detail=f"Failed to create repo: {exc}")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to create repo: {exc}")
 

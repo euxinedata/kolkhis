@@ -14,7 +14,7 @@ export function Engineering() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [errorModal, setErrorModal] = useState<string | null>(null)
 
   // Create modal state
   const [showCreate, setShowCreate] = useState(false)
@@ -32,7 +32,7 @@ export function Engineering() {
 
   useEffect(() => {
     fetchProjects()
-      .catch(() => setError('Failed to load projects'))
+      .catch(() => setErrorModal('Failed to load projects'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -49,7 +49,12 @@ export function Engineering() {
       setNewDesc('')
       await fetchProjects()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create project')
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.includes('409') || msg.includes('already exists')) {
+        setErrorModal(`A project named "${newName.trim()}" already exists. Please choose a different name.`)
+      } else {
+        setErrorModal(msg || 'Failed to create project')
+      }
     } finally {
       setCreating(false)
     }
@@ -62,7 +67,7 @@ export function Engineering() {
       await apiFetch(`/api/projects/${id}`, { method: 'DELETE' })
       await fetchProjects()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete project')
+      setErrorModal(e instanceof Error ? e.message : 'Failed to delete project')
     } finally {
       setDeleting(null)
     }
@@ -74,9 +79,8 @@ export function Engineering() {
 
       <div className="eng-content">
         {loading && <p style={{ color: '#8888bb' }}>Loading...</p>}
-        {error && <p style={{ color: '#f87171' }}>{error}</p>}
 
-        {!loading && !error && (
+        {!loading && (
           <>
             <div className="eng-toolbar">
               <button className="eng-new-btn" onClick={() => setShowCreate(true)}>
@@ -155,6 +159,21 @@ export function Engineering() {
                 disabled={!newName.trim() || creating}
               >
                 {creating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error modal */}
+      {errorModal !== null && (
+        <div className="modal-overlay" onClick={() => setErrorModal(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 0.75em', color: '#f87171', fontSize: '0.95em' }}>Error</h3>
+            <p>{errorModal}</p>
+            <div className="modal-actions">
+              <button className="modal-btn-cancel" onClick={() => setErrorModal(null)}>
+                OK
               </button>
             </div>
           </div>
