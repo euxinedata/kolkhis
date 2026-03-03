@@ -35,6 +35,32 @@
   color: #ccc;
 }
 
+.project-editor-header-spacer {
+  flex: 1;
+}
+
+.terminal-toggle-btn {
+  background: none;
+  border: 1px solid #3a3a5a;
+  color: #888;
+  font-size: 0.78em;
+  font-family: monospace;
+  padding: 0.2em 0.6em;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.terminal-toggle-btn:hover {
+  color: #ccc;
+  border-color: #646cff;
+  background: none;
+}
+
+.terminal-toggle-btn.active {
+  color: #646cff;
+  border-color: #646cff;
+}
+
 /* Body: file tree + editor */
 .project-editor-body {
   display: flex;
@@ -44,12 +70,22 @@
 
 /* File tree panel */
 .file-tree-panel {
-  width: 240px;
-  min-width: 240px;
-  border-right: 1px solid #2a2a4a;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Vertical resize handle between tree and editor */
+.tree-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: #2a2a4a;
+  flex-shrink: 0;
+}
+
+.tree-resize-handle:hover {
+  background: #646cff;
 }
 
 .file-tree-title {
@@ -264,9 +300,129 @@
   display: none;
 }
 
+/* Editor area (above terminal) */
+.editor-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .file-editor-content {
   flex: 1;
   min-height: 0;
+}
+
+/* Terminal panel */
+.terminal-resize-handle {
+  height: 4px;
+  cursor: row-resize;
+  background: #2a2a4a;
+  flex-shrink: 0;
+}
+
+.terminal-resize-handle:hover {
+  background: #646cff;
+}
+
+.terminal-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-tabs {
+  display: flex;
+  background: #181830;
+  border-top: 1px solid #2a2a4a;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.3em 0.5em 0.3em 0.75em;
+  font-size: 0.78em;
+  font-family: monospace;
+  color: #888;
+  cursor: pointer;
+  border-right: 1px solid #2a2a4a;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.terminal-tab:hover {
+  color: #bbb;
+}
+
+.terminal-tab.active {
+  color: #ccc;
+  background: #0e0e1a;
+  border-bottom: 2px solid #646cff;
+}
+
+.terminal-tab-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: transparent;
+  cursor: pointer;
+}
+
+.terminal-tab:hover .terminal-tab-close,
+.terminal-tab.active .terminal-tab-close {
+  color: #666;
+}
+
+.terminal-tab-close:hover {
+  color: #ccc !important;
+  background: #3a3a5a;
+}
+
+.terminal-tab-add {
+  background: none;
+  border: none;
+  outline: none;
+  color: #666;
+  font-size: 0.85em;
+  font-family: monospace;
+  padding: 0.3em 0.6em;
+  cursor: pointer;
+}
+
+.terminal-tab-add:hover {
+  color: #ccc;
+  background: none;
+  border: none;
+}
+
+.terminal-content {
+  flex: 1;
+  background: #0e0e1a;
+  color: #666;
+  font-family: monospace;
+  font-size: 0.85em;
+  padding: 0.5em;
+  overflow: auto;
 }
 
 .file-editor-empty {

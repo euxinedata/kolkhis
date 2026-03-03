@@ -1,7 +1,15 @@
 #root {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Login screen */
@@ -77,8 +85,8 @@
 
 /* Sidebar */
 .app-sidebar {
-  width: 180px;
-  min-width: 180px;
+  width: 120px;
+  min-width: 120px;
   border-right: 1px solid #2a2a4a;
   display: flex;
   flex-direction: column;
@@ -102,7 +110,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 0.5em 1.25em;
+  padding: 0.5em 0.75em;
   cursor: pointer;
 }
 .sidebar-section-header:hover {
@@ -119,7 +127,7 @@
 }
 .sidebar-link {
   display: block;
-  padding: 0.35em 1.5em;
+  padding: 0.35em 1em;
   font-size: 0.85em;
   color: #8888bb;
   text-decoration: none;
@@ -147,10 +155,11 @@
   overflow: auto;
 }
 
-/* Full-height layouts: remove padding */
+/* Full-height layouts: remove padding, fill height */
 .app-main:has(.query-layout),
 .app-main:has(.project-editor) {
   padding: 0;
+  overflow: hidden;
 }
 
 .query-layout {

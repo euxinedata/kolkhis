@@ -285,6 +285,14 @@ export function ProjectEditor() {
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
 
+  // Terminal state
+  const [terminalOpen, setTerminalOpen] = useState(false)
+  const [terminalTabs, setTerminalTabs] = useState<{ id: number; name: string }[]>([])
+  const [activeTerminalTab, setActiveTerminalTab] = useState<number | null>(null)
+  const [terminalHeight, setTerminalHeight] = useState(200)
+  const [treeWidth, setTreeWidth] = useState(240)
+  const nextTerminalId = useRef(1)
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [contextTarget, setContextTarget] = useState<string | null>(null)
@@ -371,6 +379,52 @@ export function ProjectEditor() {
     }
   }, [contextMenu])
 
+  // Ctrl+` toggle terminal
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        toggleTerminal()
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }) // intentionally no deps — toggleTerminal uses latest state
+
+  // Drag resize handler
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = terminalHeight
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY
+      setTerminalHeight(Math.max(100, Math.min(500, startHeight + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [terminalHeight])
+
+  // Drag resize handler for file tree width
+  const handleTreeResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = treeWidth
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      setTreeWidth(Math.max(140, Math.min(500, startWidth + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [treeWidth])
+
   async function openFile(path: string) {
     // Use ref to avoid stale closure in useCallback handlers
     if (openTabsRef.current.some(t => t.path === path)) {
@@ -432,6 +486,41 @@ export function ProjectEditor() {
       await loadStatus()
     } catch {
       // save failed — leave dirty indicator
+    }
+  }
+
+  function addTerminal() {
+    const id = nextTerminalId.current++
+    const tab = { id, name: `Terminal ${id}` }
+    setTerminalTabs(prev => [...prev, tab])
+    setActiveTerminalTab(id)
+    setTerminalOpen(true)
+  }
+
+  function closeTerminal(id: number) {
+    setTerminalTabs(prev => {
+      const idx = prev.findIndex(t => t.id === id)
+      const next = prev.filter(t => t.id !== id)
+      if (next.length === 0) {
+        setActiveTerminalTab(null)
+        setTerminalOpen(false)
+      } else if (activeTerminalTab === id) {
+        const newIdx = Math.min(idx, next.length - 1)
+        setActiveTerminalTab(next[newIdx].id)
+      }
+      return next
+    })
+  }
+
+  function toggleTerminal() {
+    if (terminalOpen) {
+      setTerminalOpen(false)
+    } else {
+      if (terminalTabs.length === 0) {
+        addTerminal()
+      } else {
+        setTerminalOpen(true)
+      }
     }
   }
 
@@ -602,9 +691,17 @@ export function ProjectEditor() {
           ← Projects
         </button>
         <span className="project-editor-name">{project.name}</span>
+        <div className="project-editor-header-spacer" />
+        <button
+          className={`terminal-toggle-btn${terminalOpen ? ' active' : ''}`}
+          onClick={toggleTerminal}
+          title="Toggle Terminal (Ctrl+`)"
+        >
+          Terminal
+        </button>
       </div>
       <div className="project-editor-body">
-        <div className="file-tree-panel">
+        <div className="file-tree-panel" style={{ width: treeWidth, minWidth: treeWidth }}>
           <div className="file-tree-title">Files</div>
           <div
             className="file-tree-list"
@@ -649,69 +746,98 @@ export function ProjectEditor() {
             </UncontrolledTreeEnvironment>
           </div>
         </div>
+        <div className="tree-resize-handle" onMouseDown={handleTreeResizeMouseDown} />
         <div className="file-editor-panel">
-          {openTabs.length > 0 && (
-            <div className="editor-tabs">
-              {openTabs.map(tab => {
-                const dirty = tab.content !== tab.savedContent
-                const name = tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path
-                return (
-                  <div
-                    key={tab.path}
-                    className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
-                    title={tab.path}
-                    onClick={() => setActiveTab(tab.path)}
-                  >
-                    <span className="editor-tab-name">{name}</span>
-                    <span
-                      className={`editor-tab-close${dirty ? ' dirty' : ''}`}
-                      onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
+          <div className="editor-area">
+            {openTabs.length > 0 && (
+              <div className="editor-tabs">
+                {openTabs.map(tab => {
+                  const dirty = tab.content !== tab.savedContent
+                  const name = tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path
+                  return (
+                    <div
+                      key={tab.path}
+                      className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
+                      title={tab.path}
+                      onClick={() => setActiveTab(tab.path)}
                     >
-                      {dirty ? <span className="editor-tab-dot">●</span> : '×'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          <div className="file-editor-content">
-            {activeTab ? (
-              fileLoading && !openTabs.some(t => t.path === activeTab) ? (
-                <div className="file-editor-empty">Loading...</div>
-              ) : (
-                <Editor
-                  height="100%"
-                  path={activeTab}
-                  language={languageForPath(activeTab)}
-                  value={openTabs.find(t => t.path === activeTab)?.content ?? ''}
-                  theme="vs-dark"
-                  onChange={(value) => {
-                    setOpenTabs(prev => prev.map(t =>
-                      t.path === activeTab ? { ...t, content: value ?? '' } : t
-                    ))
-                  }}
-                  onMount={(editor, monaco) => {
-                    editorRef.current = editor
-                    editor.addAction({
-                      id: 'save-file',
-                      label: 'Save File',
-                      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-                      run: () => { saveActiveTab() },
-                    })
-                  }}
-                  options={{
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    lineNumbers: 'on',
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                  }}
-                />
-              )
-            ) : (
-              <div className="file-editor-empty">Select a file to view</div>
+                      <span className="editor-tab-name">{name}</span>
+                      <span
+                        className={`editor-tab-close${dirty ? ' dirty' : ''}`}
+                        onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
+                      >
+                        {dirty ? <span className="editor-tab-dot">●</span> : '×'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
             )}
+            <div className="file-editor-content">
+              {activeTab ? (
+                fileLoading && !openTabs.some(t => t.path === activeTab) ? (
+                  <div className="file-editor-empty">Loading...</div>
+                ) : (
+                  <Editor
+                    height="100%"
+                    path={activeTab}
+                    language={languageForPath(activeTab)}
+                    value={openTabs.find(t => t.path === activeTab)?.content ?? ''}
+                    theme="vs-dark"
+                    onChange={(value) => {
+                      setOpenTabs(prev => prev.map(t =>
+                        t.path === activeTab ? { ...t, content: value ?? '' } : t
+                      ))
+                    }}
+                    onMount={(editor, monaco) => {
+                      editorRef.current = editor
+                      editor.addAction({
+                        id: 'save-file',
+                        label: 'Save File',
+                        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+                        run: () => { saveActiveTab() },
+                      })
+                    }}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      lineNumbers: 'on',
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                    }}
+                  />
+                )
+              ) : (
+                <div className="file-editor-empty">Select a file to view</div>
+              )}
+            </div>
           </div>
+          {terminalOpen && (
+            <>
+              <div className="terminal-resize-handle" onMouseDown={handleResizeMouseDown} />
+              <div className="terminal-panel" style={{ height: terminalHeight }}>
+                <div className="terminal-tabs">
+                  {terminalTabs.map(tab => (
+                    <div
+                      key={tab.id}
+                      className={`terminal-tab${tab.id === activeTerminalTab ? ' active' : ''}`}
+                      onClick={() => setActiveTerminalTab(tab.id)}
+                    >
+                      <span className="terminal-tab-name">{tab.name}</span>
+                      <span
+                        className="terminal-tab-close"
+                        onClick={e => { e.stopPropagation(); closeTerminal(tab.id) }}
+                      >×</span>
+                    </div>
+                  ))}
+                  <button className="terminal-tab-add" onClick={addTerminal}>+</button>
+                </div>
+                <div className="terminal-content">
+                  $ (not connected)
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
