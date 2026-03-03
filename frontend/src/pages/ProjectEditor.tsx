@@ -37,6 +37,12 @@ interface ContextMenu {
   targetDir: string
 }
 
+interface OpenTab {
+  path: string
+  content: string
+  savedContent: string
+}
+
 const PLACEHOLDER_PREFIX = '__new__'
 const REPO_ROOT = 'repo-root'
 
@@ -268,10 +274,16 @@ export function ProjectEditor() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Editor state
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState<string>('')
+  // Tab/editor state
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([])
+  const [activeTab, setActiveTab] = useState<string | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
+  const editorRef = useRef<any>(null)
+  // Refs for stable access from Monaco keybinding closure
+  const openTabsRef = useRef(openTabs)
+  openTabsRef.current = openTabs
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
@@ -360,18 +372,66 @@ export function ProjectEditor() {
   }, [contextMenu])
 
   async function openFile(path: string) {
-    if (path === selectedFile) return
-    setSelectedFile(path)
+    // Use ref to avoid stale closure in useCallback handlers
+    if (openTabsRef.current.some(t => t.path === path)) {
+      setActiveTab(path)
+      return
+    }
+    setActiveTab(path)
     setFileLoading(true)
     try {
       const data = await apiFetch<{ path: string; content: string }>(
         `/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`
       )
-      setFileContent(data.content)
+      setOpenTabs(prev => prev.some(t => t.path === path)
+        ? prev
+        : [...prev, { path, content: data.content, savedContent: data.content }]
+      )
     } catch {
-      setFileContent('// Failed to load file')
+      setOpenTabs(prev => prev.some(t => t.path === path)
+        ? prev
+        : [...prev, { path, content: '// Failed to load file', savedContent: '' }]
+      )
     } finally {
       setFileLoading(false)
+    }
+  }
+
+  function closeTab(path: string) {
+    setOpenTabs(prev => {
+      const idx = prev.findIndex(t => t.path === path)
+      const next = prev.filter(t => t.path !== path)
+      if (activeTab === path) {
+        if (next.length === 0) {
+          setActiveTab(null)
+        } else {
+          // Switch to adjacent tab
+          const newIdx = Math.min(idx, next.length - 1)
+          setActiveTab(next[newIdx].path)
+        }
+      }
+      return next
+    })
+  }
+
+  async function saveActiveTab() {
+    const currentActive = activeTabRef.current
+    const currentTabs = openTabsRef.current
+    if (!currentActive || !projectId) return
+    const tab = currentTabs.find(t => t.path === currentActive)
+    if (!tab || tab.content === tab.savedContent) return
+    try {
+      await apiFetch(`/api/projects/${projectId}/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: tab.path, content: tab.content }),
+      })
+      setOpenTabs(prev => prev.map(t =>
+        t.path === currentActive ? { ...t, savedContent: t.content } : t
+      ))
+      await loadStatus()
+    } catch {
+      // save failed — leave dirty indicator
     }
   }
 
@@ -423,9 +483,10 @@ export function ProjectEditor() {
     const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
     await dataProviderRef.current.loadDirectory(parentDir, true)
 
-    if (selectedFile === path || selectedFile?.startsWith(path + '/')) {
-      setSelectedFile(null)
-      setFileContent('')
+    // Close tabs for deleted file (or files inside deleted directory)
+    const tabsToClose = openTabs.filter(t => t.path === path || t.path.startsWith(path + '/'))
+    for (const t of tabsToClose) {
+      closeTab(t.path)
     }
 
     await loadStatus()
@@ -442,7 +503,7 @@ export function ProjectEditor() {
     provider.getTreeItem(id).then(item => {
       if (!item.isFolder) openFile(id)
     })
-  }, [projectId, selectedFile]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleExpandItem = useCallback((item: TreeItem<FileEntry>) => {
     const id = String(item.index)
@@ -465,17 +526,19 @@ export function ProjectEditor() {
       const inner = oldId.slice(PLACEHOLDER_PREFIX.length)
       const targetDir = inner.substring(0, inner.lastIndexOf('/'))
       const fullPath = targetDir ? `${targetDir}/${name}` : name
-      setSelectedFile(fullPath)
-      setFileContent('')
+      openFile(fullPath)
     } else if (!wasPlaceholder) {
-      // If renamed file was selected, update selection
+      // If renamed file has an open tab, update the tab's path
       const parentDir = oldId.includes('/') ? oldId.substring(0, oldId.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${name}` : name
-      if (selectedFile === oldId) {
-        setSelectedFile(newPath)
+      setOpenTabs(prev => prev.map(t =>
+        t.path === oldId ? { ...t, path: newPath } : t
+      ))
+      if (activeTab === oldId) {
+        setActiveTab(newPath)
       }
     }
-  }, [loadStatus, selectedFile])
+  }, [loadStatus, activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAbortRenaming = useCallback((item: TreeItem<FileEntry>) => {
     const id = String(item.index)
@@ -587,28 +650,68 @@ export function ProjectEditor() {
           </div>
         </div>
         <div className="file-editor-panel">
-          {selectedFile ? (
-            fileLoading ? (
-              <div className="file-editor-empty">Loading...</div>
-            ) : (
-              <Editor
-                height="100%"
-                language={languageForPath(selectedFile)}
-                value={fileContent}
-                theme="vs-dark"
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  wordWrap: 'on',
-                }}
-              />
-            )
-          ) : (
-            <div className="file-editor-empty">Select a file to view</div>
+          {openTabs.length > 0 && (
+            <div className="editor-tabs">
+              {openTabs.map(tab => {
+                const dirty = tab.content !== tab.savedContent
+                const name = tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path
+                return (
+                  <div
+                    key={tab.path}
+                    className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
+                    title={tab.path}
+                    onClick={() => setActiveTab(tab.path)}
+                  >
+                    <span className="editor-tab-name">{name}</span>
+                    <span
+                      className={`editor-tab-close${dirty ? ' dirty' : ''}`}
+                      onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
+                    >
+                      {dirty ? <span className="editor-tab-dot">●</span> : '×'}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           )}
+          <div className="file-editor-content">
+            {activeTab ? (
+              fileLoading && !openTabs.some(t => t.path === activeTab) ? (
+                <div className="file-editor-empty">Loading...</div>
+              ) : (
+                <Editor
+                  height="100%"
+                  path={activeTab}
+                  language={languageForPath(activeTab)}
+                  value={openTabs.find(t => t.path === activeTab)?.content ?? ''}
+                  theme="vs-dark"
+                  onChange={(value) => {
+                    setOpenTabs(prev => prev.map(t =>
+                      t.path === activeTab ? { ...t, content: value ?? '' } : t
+                    ))
+                  }}
+                  onMount={(editor, monaco) => {
+                    editorRef.current = editor
+                    editor.addAction({
+                      id: 'save-file',
+                      label: 'Save File',
+                      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+                      run: () => { saveActiveTab() },
+                    })
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                  }}
+                />
+              )
+            ) : (
+              <div className="file-editor-empty">Select a file to view</div>
+            )}
+          </div>
         </div>
       </div>
 
