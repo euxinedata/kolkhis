@@ -168,6 +168,7 @@ class SessionS3Config(BaseModel):
 class CreateSessionRequest(BaseModel):
     catalog_objects: list[CatalogObject]
     s3: SessionS3Config
+    use_databases: bool = False
 
 
 class SessionQueryRequest(BaseModel):
@@ -193,6 +194,7 @@ async def create_session(req: CreateSessionRequest, _auth: Authenticated):
         req.s3.access_key,
         req.s3.secret_key,
         req.s3.region,
+        req.use_databases,
     )
     return {"session_id": session_id}
 
