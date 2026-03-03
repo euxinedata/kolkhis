@@ -9,6 +9,7 @@ import { Engineering } from './pages/Engineering.tsx'
 import { ProjectEditor } from './pages/ProjectEditor.tsx'
 import { Placeholder } from './pages/Placeholder.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
+import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Settings as SettingsIcon } from 'lucide-react'
 import './App.css'
 
 type View = 'analytics' | 'engineering' | 'reporting'
@@ -17,6 +18,10 @@ function viewFromPath(pathname: string): View {
   if (pathname.startsWith('/engineering')) return 'engineering'
   if (pathname.startsWith('/reporting')) return 'reporting'
   return 'analytics'
+}
+
+function isBottomActive(pathname: string, section: string): boolean {
+  return pathname.startsWith(`/${section}`)
 }
 
 function App() {
@@ -41,11 +46,6 @@ function App() {
     )
   }
 
-  const handleViewClick = (view: View) => {
-    if (view === 'analytics') navigate('/')
-    else navigate(`/${view}`)
-  }
-
   return (
     <div className="app">
       <nav className="app-nav">
@@ -61,46 +61,87 @@ function App() {
       <div className="app-body">
         <aside className="app-sidebar">
           <div className="sidebar-sections">
-            <div className="sidebar-section">
+            <div className="sidebar-item">
               <button
-                className={`sidebar-section-header ${activeView === 'analytics' ? 'active' : ''}`}
-                onClick={() => handleViewClick('analytics')}
+                className={`sidebar-icon-btn ${activeView === 'analytics' ? 'active' : ''}`}
+                onClick={() => navigate('/')}
+                title="Analytics"
               >
-                Analytics
+                <Table size={20} />
               </button>
-              {activeView === 'analytics' && (
-                <div className="sidebar-links">
-                  <NavLink to="/" end className="sidebar-link">Query</NavLink>
-                  <NavLink to="/history" className="sidebar-link">History</NavLink>
-                </div>
-              )}
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Analytics</div>
+                <NavLink to="/" end className="sidebar-flyout-link">Query</NavLink>
+                <NavLink to="/history" className="sidebar-flyout-link">History</NavLink>
+              </div>
             </div>
-            <div className="sidebar-section">
+            <div className="sidebar-item">
               <button
-                className={`sidebar-section-header ${activeView === 'engineering' ? 'active' : ''}`}
-                onClick={() => handleViewClick('engineering')}
+                className={`sidebar-icon-btn ${activeView === 'engineering' ? 'active' : ''}`}
+                onClick={() => navigate('/engineering')}
+                title="Engineering"
               >
-                Engineering
+                <CodeXml size={20} />
               </button>
-              {activeView === 'engineering' && (
-                <div className="sidebar-links">
-                  <NavLink to="/engineering" end className="sidebar-link">Projects</NavLink>
-                </div>
-              )}
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Engineering</div>
+                <NavLink to="/engineering" end className="sidebar-flyout-link">Projects</NavLink>
+              </div>
             </div>
-            <div className="sidebar-section">
+            <div className="sidebar-item">
               <button
-                className={`sidebar-section-header ${activeView === 'reporting' ? 'active' : ''}`}
-                onClick={() => handleViewClick('reporting')}
+                className={`sidebar-icon-btn ${activeView === 'reporting' ? 'active' : ''}`}
+                onClick={() => navigate('/reporting')}
+                title="Reporting"
               >
-                Reporting
+                <LayoutDashboard size={20} />
               </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Reporting</div>
+                <NavLink to="/reporting" className="sidebar-flyout-link">Reports</NavLink>
+              </div>
             </div>
           </div>
           <div className="sidebar-bottom">
-            <NavLink to="/resources" className="sidebar-link">Resources</NavLink>
-            <NavLink to="/billing" className="sidebar-link">Billing</NavLink>
-            <NavLink to="/settings" className="sidebar-link">Settings</NavLink>
+            <div className="sidebar-item">
+              <button
+                className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'resources') ? 'active' : ''}`}
+                onClick={() => navigate('/resources')}
+                title="Resources"
+              >
+                <Server size={20} />
+              </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Resources</div>
+                <NavLink to="/resources" className="sidebar-flyout-link">Resources</NavLink>
+              </div>
+            </div>
+            <div className="sidebar-item">
+              <button
+                className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'billing') ? 'active' : ''}`}
+                onClick={() => navigate('/billing')}
+                title="Billing"
+              >
+                <ReceiptText size={20} />
+              </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Billing</div>
+                <NavLink to="/billing" className="sidebar-flyout-link">Billing</NavLink>
+              </div>
+            </div>
+            <div className="sidebar-item">
+              <button
+                className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'settings') ? 'active' : ''}`}
+                onClick={() => navigate('/settings')}
+                title="Settings"
+              >
+                <SettingsIcon size={20} />
+              </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Settings</div>
+                <NavLink to="/settings" className="sidebar-flyout-link">Settings</NavLink>
+              </div>
+            </div>
           </div>
         </aside>
         <main className="app-main">
