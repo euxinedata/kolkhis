@@ -129,6 +129,17 @@ class ServerTypeRate(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    gitea_repo_name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class BillingPeriod(Base):
     __tablename__ = "billing_periods"
 

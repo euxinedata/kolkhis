@@ -142,7 +142,8 @@
   outline: none;
 }
 
-/* Remove the button focus-visible outline (style-modern.css line 70-72) */
+/* Remove the button focus/focus-visible outline (global index.css + style-modern.css) */
+.file-tree-list .rct-tree-item-button:focus,
 .file-tree-list .rct-tree-item-button:focus-visible {
   outline: none;
 }
@@ -164,6 +165,7 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+  pointer-events: none;
 }
 
 /* Editor panel */

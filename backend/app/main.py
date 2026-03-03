@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import (
-    JWT_SECRET, FRONTEND_URL, RESULTS_PATH, WAREHOUSE_PATH, WORKER_MODE,
-    GITEA_ADMIN_PASSWORD, is_s3_warehouse,
+    JWT_SECRET, FRONTEND_URL, RESULTS_PATH, PROJECTS_PATH, WAREHOUSE_PATH,
+    WORKER_MODE, GITEA_ADMIN_PASSWORD, is_s3_warehouse,
 )
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
@@ -23,12 +23,14 @@ from app.routers.billing import router as billing_router
 from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
 from app.routers.settings import router as settings_router
+from app.routers.projects import router as projects_router
 from app.routers.workers import router as workers_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(RESULTS_PATH, exist_ok=True)
+    os.makedirs(PROJECTS_PATH, exist_ok=True)
     if not is_s3_warehouse():
         os.makedirs(WAREHOUSE_PATH, exist_ok=True)
     async with engine.begin() as conn:
@@ -78,6 +80,7 @@ app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(catalog_router)
+app.include_router(projects_router)
 app.include_router(queries_router)
 app.include_router(settings_router)
 app.include_router(workers_router)

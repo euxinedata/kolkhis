@@ -1,0 +1,175 @@
+.engineering-page {
+  padding: 1em 1.5em;
+  max-width: 900px;
+}
+
+/* Tabs */
+.eng-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #2a2a4a;
+  margin-bottom: 1.5em;
+}
+
+.eng-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8888bb;
+  font-size: 0.9em;
+  padding: 0.5em 1em;
+  cursor: pointer;
+}
+
+.eng-tab:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.87);
+  background: none;
+  border-color: transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.eng-tab.active {
+  color: #646cff;
+  border-bottom-color: #646cff;
+}
+
+.eng-tab:disabled {
+  color: #555;
+  cursor: default;
+}
+
+/* Toolbar */
+.eng-toolbar {
+  margin-bottom: 1em;
+}
+
+.eng-new-btn {
+  font-size: 0.85em;
+  padding: 0.4em 1em;
+}
+
+/* Project grid */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1em;
+}
+
+.project-card {
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 1em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.project-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-card-name {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #ccc;
+}
+
+.project-card-desc {
+  font-size: 0.82em;
+  color: #8888bb;
+  margin: 0;
+}
+
+.project-card-date {
+  font-size: 0.75em;
+  color: #666;
+}
+
+.project-delete-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #f87171;
+  border-radius: 4px;
+  padding: 0.2em 0.6em;
+  cursor: pointer;
+  font-size: 0.75em;
+}
+
+.project-delete-btn:hover {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* Form fields in modal */
+.eng-form-field {
+  margin-bottom: 1em;
+}
+
+.eng-form-field label {
+  display: block;
+  font-size: 0.8em;
+  color: #8888bb;
+  margin-bottom: 0.3em;
+}
+
+.eng-form-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4em 0.6em;
+  font-size: 0.9em;
+  background: #16162a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ccc;
+}
+
+.eng-form-field input:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.eng-create-btn {
+  font-size: 0.85em;
+  padding: 0.35em 1em;
+}
+
+.eng-create-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Light mode */
+@media (prefers-color-scheme: light) {
+  .eng-tabs {
+    border-bottom-color: #e0e0ea;
+  }
+  .eng-tab {
+    color: #666688;
+  }
+  .eng-tab:hover:not(:disabled) {
+    color: #213547;
+  }
+  .eng-tab.active {
+    color: #4a50c8;
+    border-bottom-color: #4a50c8;
+  }
+  .eng-tab:disabled {
+    color: #bbb;
+  }
+  .project-card {
+    border-color: #e0e0ea;
+  }
+  .project-card-name {
+    color: #333;
+  }
+  .project-card-desc {
+    color: #666688;
+  }
+  .eng-form-field input {
+    background: #f5f5fa;
+    border-color: #ddd;
+    color: #333;
+  }
+}
