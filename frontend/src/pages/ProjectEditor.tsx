@@ -41,6 +41,38 @@ interface OpenTab {
   path: string
   content: string
   savedContent: string
+  cursorLine: number
+  cursorColumn: number
+  scrollTop: number
+}
+
+interface EditorSession {
+  openTabs: OpenTab[]
+  activeTab: string | null
+  terminalTabs: { id: number; name: string }[]
+  activeTerminalTab: number | null
+  terminalOpen: boolean
+  terminalHeight: number
+  treeWidth: number
+  nextTerminalId: number
+}
+
+function sessionKey(projectId: string): string {
+  return `kolkhis-editor-session-${projectId}`
+}
+
+function loadSession(projectId: string): EditorSession | null {
+  try {
+    const raw = localStorage.getItem(sessionKey(projectId))
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch { return null }
+}
+
+function saveSession(projectId: string, session: EditorSession): void {
+  try {
+    localStorage.setItem(sessionKey(projectId), JSON.stringify(session))
+  } catch { /* storage full — ignore */ }
 }
 
 const PLACEHOLDER_PREFIX = '__new__'
@@ -274,9 +306,12 @@ export function ProjectEditor() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Load saved session
+  const savedSession = projectId ? loadSession(projectId) : null
+
   // Tab/editor state
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([])
-  const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>(savedSession?.openTabs ?? [])
+  const [activeTab, setActiveTab] = useState<string | null>(savedSession?.activeTab ?? null)
   const [fileLoading, setFileLoading] = useState(false)
   const editorRef = useRef<any>(null)
   // Refs for stable access from Monaco keybinding closure
@@ -286,12 +321,24 @@ export function ProjectEditor() {
   activeTabRef.current = activeTab
 
   // Terminal state
-  const [terminalOpen, setTerminalOpen] = useState(false)
-  const [terminalTabs, setTerminalTabs] = useState<{ id: number; name: string }[]>([])
-  const [activeTerminalTab, setActiveTerminalTab] = useState<number | null>(null)
-  const [terminalHeight, setTerminalHeight] = useState(200)
-  const [treeWidth, setTreeWidth] = useState(240)
-  const nextTerminalId = useRef(1)
+  const [terminalOpen, setTerminalOpen] = useState(savedSession?.terminalOpen ?? false)
+  const [terminalTabs, setTerminalTabs] = useState<{ id: number; name: string }[]>(savedSession?.terminalTabs ?? [])
+  const [activeTerminalTab, setActiveTerminalTab] = useState<number | null>(savedSession?.activeTerminalTab ?? null)
+  const [terminalHeight, setTerminalHeight] = useState(savedSession?.terminalHeight ?? 200)
+  const [treeWidth, setTreeWidth] = useState(savedSession?.treeWidth ?? 240)
+  const nextTerminalId = useRef(savedSession?.nextTerminalId ?? 1)
+
+  // Refs for unmount save (must track latest values)
+  const terminalOpenRef = useRef(terminalOpen)
+  terminalOpenRef.current = terminalOpen
+  const terminalTabsRef = useRef(terminalTabs)
+  terminalTabsRef.current = terminalTabs
+  const activeTerminalTabRef = useRef(activeTerminalTab)
+  activeTerminalTabRef.current = activeTerminalTab
+  const terminalHeightRef = useRef(terminalHeight)
+  terminalHeightRef.current = terminalHeight
+  const treeWidthRef = useRef(treeWidth)
+  treeWidthRef.current = treeWidth
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
@@ -312,6 +359,67 @@ export function ProjectEditor() {
   const [treeKey, setTreeKey] = useState(0)
   // Track active placeholder for cleanup
   const activePlaceholderRef = useRef<string | null>(null)
+
+  // Persist session to localStorage (debounced)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!projectId) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      // Snapshot cursor/scroll from live editor into tabs before persisting
+      const tabs = [...openTabsRef.current]
+      const editor = editorRef.current
+      const current = activeTabRef.current
+      if (editor && current) {
+        const pos = editor.getPosition()
+        const scroll = editor.getScrollTop()
+        const idx = tabs.findIndex(t => t.path === current)
+        if (idx >= 0) {
+          tabs[idx] = { ...tabs[idx], cursorLine: pos?.lineNumber ?? 1, cursorColumn: pos?.column ?? 1, scrollTop: scroll ?? 0 }
+        }
+      }
+      saveSession(projectId, {
+        openTabs: tabs,
+        activeTab: activeTabRef.current,
+        terminalTabs,
+        activeTerminalTab,
+        terminalOpen,
+        terminalHeight,
+        treeWidth,
+        nextTerminalId: nextTerminalId.current,
+      })
+    }, 300)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [projectId, openTabs, activeTab, terminalTabs, activeTerminalTab, terminalOpen, terminalHeight, treeWidth])
+
+  // Save immediately on unmount (captures cursor position)
+  useEffect(() => {
+    if (!projectId) return
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const tabs = [...openTabsRef.current]
+      const editor = editorRef.current
+      const current = activeTabRef.current
+      if (editor && current) {
+        const pos = editor.getPosition()
+        const scroll = editor.getScrollTop()
+        const idx = tabs.findIndex(t => t.path === current)
+        if (idx >= 0) {
+          tabs[idx] = { ...tabs[idx], cursorLine: pos?.lineNumber ?? 1, cursorColumn: pos?.column ?? 1, scrollTop: scroll ?? 0 }
+        }
+      }
+      saveSession(projectId, {
+        openTabs: tabs,
+        activeTab: activeTabRef.current,
+        terminalTabs: terminalTabsRef.current,
+        activeTerminalTab: activeTerminalTabRef.current,
+        terminalOpen: terminalOpenRef.current,
+        terminalHeight: terminalHeightRef.current,
+        treeWidth: treeWidthRef.current,
+        nextTerminalId: nextTerminalId.current,
+      })
+    }
+  }, [projectId])
 
   const loadStatus = useCallback(async () => {
     if (!projectId) return
@@ -445,12 +553,28 @@ export function ProjectEditor() {
     document.addEventListener('mouseup', onMouseUp)
   }, [treeWidth])
 
+  // Flush cursor/scroll from editor into the current tab's state
+  function flushEditorState() {
+    const editor = editorRef.current
+    const current = activeTabRef.current
+    if (!editor || !current) return
+    const pos = editor.getPosition()
+    const scroll = editor.getScrollTop()
+    setOpenTabs(prev => prev.map(t =>
+      t.path === current
+        ? { ...t, cursorLine: pos?.lineNumber ?? t.cursorLine, cursorColumn: pos?.column ?? t.cursorColumn, scrollTop: scroll ?? t.scrollTop }
+        : t
+    ))
+  }
+
   async function openFile(path: string) {
     // Use ref to avoid stale closure in useCallback handlers
     if (openTabsRef.current.some(t => t.path === path)) {
+      flushEditorState()
       setActiveTab(path)
       return
     }
+    flushEditorState()
     setActiveTab(path)
     setFileLoading(true)
     try {
@@ -459,12 +583,12 @@ export function ProjectEditor() {
       )
       setOpenTabs(prev => prev.some(t => t.path === path)
         ? prev
-        : [...prev, { path, content: data.content, savedContent: data.content }]
+        : [...prev, { path, content: data.content, savedContent: data.content, cursorLine: 1, cursorColumn: 1, scrollTop: 0 }]
       )
     } catch {
       setOpenTabs(prev => prev.some(t => t.path === path)
         ? prev
-        : [...prev, { path, content: '// Failed to load file', savedContent: '' }]
+        : [...prev, { path, content: '// Failed to load file', savedContent: '', cursorLine: 1, cursorColumn: 1, scrollTop: 0 }]
       )
     } finally {
       setFileLoading(false)
@@ -798,7 +922,7 @@ export function ProjectEditor() {
                       key={tab.path}
                       className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
                       title={tab.path}
-                      onClick={() => setActiveTab(tab.path)}
+                      onClick={() => { flushEditorState(); setActiveTab(tab.path) }}
                     >
                       <span className="editor-tab-name">{name}</span>
                       <span
@@ -836,6 +960,12 @@ export function ProjectEditor() {
                         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
                         run: () => { saveActiveTab() },
                       })
+                      // Restore cursor and scroll for the active tab
+                      const tab = openTabsRef.current.find(t => t.path === activeTabRef.current)
+                      if (tab) {
+                        editor.setPosition({ lineNumber: tab.cursorLine, column: tab.cursorColumn })
+                        editor.setScrollTop(tab.scrollTop)
+                      }
                     }}
                     options={{
                       minimap: { enabled: false },
