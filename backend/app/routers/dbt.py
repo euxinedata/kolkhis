@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import uuid
+from datetime import datetime
 
+import httpx
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.config import (
     S3_ACCESS_KEY,
@@ -13,10 +16,12 @@ from app.config import (
     S3_REGION,
     S3_SECRET_KEY,
     WORKER_AUTH_TOKEN,
+    WORKER_URL,
 )
 from app.database import async_session
-from app.models import CatalogObject, Database, Schema
+from app.models import CatalogObject, Database, QueryJob, Schema
 from app.query_engine import _load_catalog_objects
+from app.sql_rewriter import rewrite
 from app.warehouse import catalog
 
 logger = logging.getLogger(__name__)
@@ -186,6 +191,83 @@ async def register_view(req: RegisterViewRequest, _: None = Depends(_verify_toke
         await session.commit()
 
     return {"status": "ok"}
+
+
+class SessionQueryProxyRequest(BaseModel):
+    sql: str
+    fetch_results: bool = True
+    user_id: int = 0
+
+
+@router.post("/session/{session_id}/query")
+async def session_query_proxy(
+    session_id: str,
+    req: SessionQueryProxyRequest,
+    _: None = Depends(_verify_token),
+):
+    """Proxy a dbt session query through the backend for history tracking."""
+    rewritten_sql = rewrite(req.sql)
+
+    # Create QueryJob record
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    async with async_session() as session:
+        session.add(QueryJob(
+            id=job_id,
+            user_id=req.user_id,
+            sql=req.sql,
+            status="running",
+            started_at=now,
+        ))
+        await session.commit()
+
+    # Forward to worker
+    headers = {"Authorization": f"Bearer {WORKER_AUTH_TOKEN}"}
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{WORKER_URL}/session/{session_id}/query",
+                json={"sql": rewritten_sql, "fetch_results": req.fetch_results},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            worker_result = resp.json()
+    except Exception as e:
+        async with async_session() as session:
+            await session.execute(
+                update(QueryJob).where(QueryJob.id == job_id).values(
+                    status="failed",
+                    error=str(e)[:2048],
+                    completed_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Record result based on worker status
+    if worker_result.get("status") == "failed":
+        async with async_session() as session:
+            await session.execute(
+                update(QueryJob).where(QueryJob.id == job_id).values(
+                    status="failed",
+                    error=worker_result.get("error", "Query failed")[:2048],
+                    completed_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+    else:
+        row_count = worker_result.get("row_count", 0)
+        async with async_session() as session:
+            await session.execute(
+                update(QueryJob).where(QueryJob.id == job_id).values(
+                    status="completed",
+                    row_count=row_count,
+                    completed_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+
+    return worker_result
 
 
 class DropObjectRequest(BaseModel):
