@@ -164,9 +164,12 @@ async def session_status(user_id: int = Depends(_verify_dbt_token)):
         return {"status": "ready"}
 
     # Still provisioning — check if the worker is actually healthy now
+    worker_health_url = f"http://{vm.private_ip}:8080/health"
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"http://{vm.private_ip}:8080/health")
+        logger.info("Checking worker health at %s", worker_health_url)
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(worker_health_url)
+            logger.info("Worker health response: %s", resp.status_code)
             if resp.status_code == 200:
                 # Mark as ready
                 async with async_session() as session:
@@ -176,9 +179,10 @@ async def session_status(user_id: int = Depends(_verify_dbt_token)):
                         )
                     )
                     await session.commit()
+                logger.info("Worker VM %d marked as ready", vm.id)
                 return {"status": "ready"}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.info("Worker health check failed: %s", e)
 
     return {"status": "provisioning", "message": "Worker is starting up..."}
 
