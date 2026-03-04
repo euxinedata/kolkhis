@@ -46,8 +46,12 @@ def setup_connection(
         )
     """)
 
-    created_dbs: set[str] = set()
-    created_schemas: set[str] = set()
+    # Always create the default 'kolkhis' database for dbt target writes
+    conn.execute('ATTACH \':memory:\' AS "kolkhis"')
+    conn.execute('CREATE SCHEMA IF NOT EXISTS "kolkhis"."main"')
+
+    created_dbs: set[str] = {"kolkhis"}
+    created_schemas: set[str] = {'"kolkhis"."main"'}
     sorted_objects = sorted(
         catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1
     )
