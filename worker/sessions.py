@@ -35,7 +35,6 @@ class SessionManager:
         s3_access_key: str,
         s3_secret_key: str,
         s3_region: str,
-        use_databases: bool = False,
     ) -> str:
         session_id = uuid.uuid4().hex
         temp_dir = os.path.join(tempfile.gettempdir(), f".session_{session_id}")
@@ -49,7 +48,6 @@ class SessionManager:
         setup_connection(
             conn, catalog_objects,
             s3_endpoint, s3_access_key, s3_secret_key, s3_region,
-            use_databases=use_databases,
         )
 
         now = time.time()

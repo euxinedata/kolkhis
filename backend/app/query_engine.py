@@ -194,79 +194,6 @@ async def _load_catalog_objects() -> list[dict]:
         return objects
 
 
-def _rewrite_three_part_names(sql: str, catalog_objects: list[dict]) -> str:
-    """Rewrite database.schema.table references to "database.schema"."table" for DuckDB.
-
-    DuckDB only supports two-level identifiers (schema.table). We rewrite any
-    three-part name that matches a known catalog object so users can write
-    natural SQL like: SELECT * FROM retail_catalog.products.categories
-    """
-    # Build a map of (db, schema, name) -> duckdb reference
-    replacements: list[tuple[str, str]] = []
-    for obj in catalog_objects:
-        # Match db.schema.name (with optional quoting)
-        db, schema, name = obj["database"], obj["schema"], obj["name"]
-        # Three-part: db.schema.name -> "db.schema"."name"
-        three_part = f"{db}.{schema}.{name}"
-        duckdb_ref = f'"{db}.{schema}"."{name}"'
-        replacements.append((three_part, duckdb_ref))
-
-    # Two-part rewrites for unambiguous schema names
-    schema_db_map: dict[str, set[str]] = {}
-    for obj in catalog_objects:
-        schema_db_map.setdefault(obj["schema"], set()).add(obj["database"])
-
-    for obj in catalog_objects:
-        schema, name, db = obj["schema"], obj["name"], obj["database"]
-        if len(schema_db_map[schema]) == 1:
-            two_part = f"{schema}.{name}"
-            duckdb_ref = f'"{db}.{schema}"."{name}"'
-            replacements.append((two_part, duckdb_ref))
-
-    # Sort longest first to avoid partial matches
-    replacements.sort(key=lambda x: len(x[0]), reverse=True)
-
-    for pattern, replacement in replacements:
-        # Replace as whole identifier (case-insensitive)
-        sql = re.sub(re.escape(pattern), replacement, sql, flags=re.IGNORECASE)
-
-    return sql
-
-
-def _find_referenced_objects(sql: str, catalog_objects: list[dict]) -> list[dict]:
-    """Return only catalog objects whose names appear in the SQL.
-
-    Checks both three-part (db.schema.name) and two-part (schema.name) forms,
-    case-insensitively. For any referenced view, recursively includes objects
-    referenced in that view's view_sql.
-    """
-    sql_upper = sql.upper()
-    referenced = []
-    for obj in catalog_objects:
-        three_part = f"{obj['database']}.{obj['schema']}.{obj['name']}".upper()
-        two_part = f"{obj['schema']}.{obj['name']}".upper()
-        if three_part in sql_upper or two_part in sql_upper:
-            referenced.append(obj)
-    # Recursively include objects referenced by views
-    seen = {(o["database"], o["schema"], o["name"]) for o in referenced}
-    queue = [o for o in referenced if o["object_type"] == "view" and o["view_sql"]]
-    while queue:
-        view = queue.pop()
-        view_upper = view["view_sql"].upper()
-        for obj in catalog_objects:
-            key = (obj["database"], obj["schema"], obj["name"])
-            if key in seen:
-                continue
-            three_part = f"{obj['database']}.{obj['schema']}.{obj['name']}".upper()
-            two_part = f"{obj['schema']}.{obj['name']}".upper()
-            if three_part in view_upper or two_part in view_upper:
-                seen.add(key)
-                referenced.append(obj)
-                if obj["object_type"] == "view" and obj["view_sql"]:
-                    queue.append(obj)
-    return referenced
-
-
 def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
     """Run a SQL query via DuckDB against registered catalog objects. Returns row count."""
     temp_dir = os.path.join(RESULTS_PATH, f".tmp_{job_id}")
@@ -294,36 +221,39 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
                 )
             """)
 
-        # Only register objects actually referenced in the SQL
-        referenced_objects = _find_referenced_objects(sql, catalog_objects)
+        # Register all catalog objects using native DuckDB three-part naming
+        created_dbs: set[str] = set()
         created_schemas: set[str] = set()
-        sorted_objects = sorted(referenced_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
+        sorted_objects = sorted(catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1)
         for obj in sorted_objects:
-            duckdb_schema = f"{obj['database']}.{obj['schema']}"
+            db_name = obj["database"]
+            schema_name = obj["schema"]
 
-            if duckdb_schema not in created_schemas:
-                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{duckdb_schema}"')
-                created_schemas.add(duckdb_schema)
+            if db_name not in created_dbs:
+                conn.execute(f'ATTACH \':memory:\' AS "{db_name}"')
+                created_dbs.add(db_name)
 
+            full_schema = f'"{db_name}"."{schema_name}"'
+            if full_schema not in created_schemas:
+                conn.execute(f"CREATE SCHEMA IF NOT EXISTS {full_schema}")
+                created_schemas.add(full_schema)
+
+            qualified_name = f'{full_schema}."{obj["name"]}"'
             if obj["object_type"] == "table" and obj["iceberg_identifier"]:
                 tbl = catalog.load_table(obj["iceberg_identifier"])
                 metadata_path = tbl.metadata_location
                 conn.execute(
-                    f'CREATE VIEW "{duckdb_schema}"."{obj["name"]}" AS '
+                    f"CREATE VIEW {qualified_name} AS "
                     f"SELECT * FROM iceberg_scan('{metadata_path}')"
                 )
             elif obj["object_type"] == "view" and obj["view_sql"]:
-                view_sql = _rewrite_three_part_names(obj["view_sql"], catalog_objects)
                 try:
                     conn.execute(
-                        f'CREATE VIEW "{duckdb_schema}"."{obj["name"]}" AS '
-                        f'{view_sql}'
+                        f"CREATE VIEW {qualified_name} AS "
+                        f"{obj['view_sql']}"
                     )
                 except duckdb.Error:
                     pass  # skip broken views — they'll error only if actually queried
-
-        # Rewrite three-part names to DuckDB two-part names
-        sql = _rewrite_three_part_names(sql, catalog_objects)
 
         # Strip trailing semicolons
         sql = sql.strip().rstrip(";").strip()
@@ -359,13 +289,11 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
 
     from app.worker_manager import ensure_worker, wait_for_ready
 
-    # Load catalog and find referenced objects
+    # Load catalog objects and resolve metadata locations
     catalog_objects = await _load_catalog_objects()
-    referenced = _find_referenced_objects(sql, catalog_objects)
 
-    # Resolve metadata locations for referenced tables
     resolved_objects = []
-    for obj in referenced:
+    for obj in catalog_objects:
         entry = {
             "duckdb_schema": f"{obj['database']}.{obj['schema']}",
             "name": obj["name"],
@@ -377,9 +305,6 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
         elif obj["object_type"] == "view" and obj["view_sql"]:
             entry["view_sql"] = obj["view_sql"]
         resolved_objects.append(entry)
-
-    # Rewrite SQL
-    rewritten_sql = _rewrite_three_part_names(sql, catalog_objects)
 
     # Ensure worker VM is ready
     await _update_job(job_id, status="provisioning")
@@ -399,7 +324,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int):
     # POST query to worker
     payload = {
         "job_id": job_id,
-        "sql": rewritten_sql,
+        "sql": sql,
         "catalog_objects": resolved_objects,
         "s3": {
             "endpoint": S3_RESULTS_ENDPOINT,
@@ -496,10 +421,9 @@ async def _execute_local_worker(job_id: str, sql: str):
     import httpx
 
     catalog_objects = await _load_catalog_objects()
-    referenced = _find_referenced_objects(sql, catalog_objects)
 
     resolved_objects = []
-    for obj in referenced:
+    for obj in catalog_objects:
         entry = {
             "duckdb_schema": f"{obj['database']}.{obj['schema']}",
             "name": obj["name"],
@@ -512,12 +436,11 @@ async def _execute_local_worker(job_id: str, sql: str):
             entry["view_sql"] = obj["view_sql"]
         resolved_objects.append(entry)
 
-    rewritten_sql = _rewrite_three_part_names(sql, catalog_objects)
     result_path = _result_path(job_id)
 
     payload = {
         "job_id": job_id,
-        "sql": rewritten_sql,
+        "sql": sql,
         "catalog_objects": resolved_objects,
         "s3": {
             "endpoint": S3_ENDPOINT,
