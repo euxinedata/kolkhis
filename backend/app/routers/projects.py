@@ -53,7 +53,6 @@ DBT_PROFILE_TEMPLATE = """\
     dev:
       type: kolkhis
       backend_url: {backend_url}
-      worker_url: {worker_url}
       auth_token: '{auth_token}'
       database: kolkhis
       schema: main
@@ -202,7 +201,6 @@ async def create_project(
     profile_entry = DBT_PROFILE_TEMPLATE.format(
         name=dbt_name,
         backend_url=config.SHELL_BACKEND_URL,
-        worker_url=config.SHELL_WORKER_URL,
         auth_token=auth_token,
     )
     with open(profiles_path, "a") as f:
