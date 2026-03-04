@@ -797,3 +797,45 @@
   color: #ccc;
   background: #2a2a2a;
 }
+
+/* Query tab add button */
+.query-tab-add {
+  background: none;
+  border: none;
+  outline: none;
+  color: #666;
+  font-size: 12px;
+  padding: 4px 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.query-tab-add:hover {
+  color: #ccc;
+  background: none;
+  border: none;
+}
+
+/* Query tab inline rename */
+.query-tab-rename {
+  background: #060606;
+  border: 1px solid #d4850a;
+  border-radius: 2px;
+  color: #ccc;
+  font-size: 1em;
+  font-family: 'Geist Mono', monospace;
+  padding: 0 0.25em;
+  width: 80px;
+  outline: none;
+}
+
+/* Empty state */
+.query-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.query-empty-state button {
+  padding: 0.5em 1.5em;
+  font-size: 0.9em;
+}
