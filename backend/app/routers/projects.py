@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from app.auth import require_auth
 from app import config
 from app.database import get_db
 from app.gitea import create_repo, create_or_update_file, delete_repo
-from app.models import Project
+from app.models import Project, UserApiToken
 from app.shell import ensure_shell_user
 from app.workspace import (
     clone_repo, ensure_clone, remove_repo,
@@ -53,7 +55,6 @@ DBT_PROFILE_TEMPLATE = """\
       backend_url: {backend_url}
       worker_url: {worker_url}
       auth_token: '{auth_token}'
-      user_id: {user_id}
       database: kolkhis
       schema: main
 """
@@ -119,6 +120,39 @@ async def list_projects(
     ]
 
 
+async def _ensure_user_api_token(user_id: int, shell_username: str, db: AsyncSession) -> str:
+    """Get or create a per-user API token. Returns the plain token string."""
+    token_file = Path(config.HOMES_PATH) / shell_username / ".kolkhis" / "api_token"
+
+    # If user already has a token, read it from the filesystem
+    result = await db.execute(
+        select(UserApiToken).where(UserApiToken.user_id == user_id)
+    )
+    if result.scalar_one_or_none() is not None and token_file.exists():
+        return token_file.read_text().strip()
+
+    # Generate new token
+    plain_token = secrets.token_hex(32)
+    token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
+
+    # Upsert in DB
+    result = await db.execute(
+        select(UserApiToken).where(UserApiToken.user_id == user_id)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        existing.token_hash = token_hash
+    else:
+        db.add(UserApiToken(user_id=user_id, token_hash=token_hash))
+    await db.flush()
+
+    # Persist plain token to filesystem
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(plain_token)
+
+    return plain_token
+
+
 @router.post("")
 async def create_project(
     body: CreateProject,
@@ -159,6 +193,9 @@ async def create_project(
     for d in DBT_DIRS:
         create_directory(shell_username, repo_name, d)
 
+    # Ensure per-user API token exists
+    auth_token = await _ensure_user_api_token(uid, shell_username, db)
+
     # Append profile entry to ~/.dbt/profiles.yml on host filesystem
     profiles_path = Path(config.HOMES_PATH) / shell_username / ".dbt" / "profiles.yml"
     profiles_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,8 +203,7 @@ async def create_project(
         name=dbt_name,
         backend_url=config.SHELL_BACKEND_URL,
         worker_url=config.SHELL_WORKER_URL,
-        auth_token=config.WORKER_AUTH_TOKEN,
-        user_id=uid,
+        auth_token=auth_token,
     )
     with open(profiles_path, "a") as f:
         f.write(profile_entry)

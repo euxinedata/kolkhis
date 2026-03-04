@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import uuid
 from datetime import datetime
@@ -19,7 +20,7 @@ from app.config import (
     WORKER_URL,
 )
 from app.database import async_session
-from app.models import CatalogObject, Database, QueryJob, Schema
+from app.models import CatalogObject, Database, QueryJob, Schema, UserApiToken
 from app.query_engine import _load_catalog_objects
 from app.sql_rewriter import rewrite
 from app.warehouse import catalog
@@ -29,17 +30,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dbt")
 
 
-def _verify_token(authorization: str = Header()) -> None:
-    """Verify bearer token matches the shared worker auth token."""
+async def _verify_dbt_token(authorization: str = Header()) -> int:
+    """Verify per-user API token and return user_id."""
     prefix = "Bearer "
     if not authorization.startswith(prefix):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
-    if authorization[len(prefix):] != WORKER_AUTH_TOKEN:
+    token = authorization[len(prefix):]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserApiToken).where(UserApiToken.token_hash == token_hash)
+        )
+        user_token = result.scalar_one_or_none()
+    if user_token is None:
         raise HTTPException(status_code=401, detail="Invalid token")
+    return user_token.user_id
 
 
 @router.get("/session-config")
-async def session_config(_: None = Depends(_verify_token)):
+async def session_config(user_id: int = Depends(_verify_dbt_token)):
     """Return catalog objects with resolved metadata locations and S3 config.
 
     Used by the dbt-kolkhis adapter to create a worker session.
@@ -70,6 +79,7 @@ async def session_config(_: None = Depends(_verify_token)):
             "secret_key": S3_SECRET_KEY,
             "region": S3_REGION,
         },
+        "worker_auth_token": WORKER_AUTH_TOKEN,
     }
 
 
@@ -101,7 +111,7 @@ async def _ensure_db_and_schema(db_name: str, schema_name: str) -> int:
 
 @router.post("/materialize")
 async def materialize(
-    _: None = Depends(_verify_token),
+    _user_id: int = Depends(_verify_dbt_token),
     arrow_data: UploadFile = File(...),
     database: str = Form(...),
     schema_name: str = Form(...),
@@ -166,7 +176,7 @@ class RegisterViewRequest(BaseModel):
 
 
 @router.post("/register-view")
-async def register_view(req: RegisterViewRequest, _: None = Depends(_verify_token)):
+async def register_view(req: RegisterViewRequest, _user_id: int = Depends(_verify_dbt_token)):
     """Register a view definition in the PostgreSQL catalog."""
     schema_id = await _ensure_db_and_schema(req.database, req.schema_name)
     async with async_session() as session:
@@ -196,14 +206,13 @@ async def register_view(req: RegisterViewRequest, _: None = Depends(_verify_toke
 class SessionQueryProxyRequest(BaseModel):
     sql: str
     fetch_results: bool = True
-    user_id: int = 0
 
 
 @router.post("/session/{session_id}/query")
 async def session_query_proxy(
     session_id: str,
     req: SessionQueryProxyRequest,
-    _: None = Depends(_verify_token),
+    user_id: int = Depends(_verify_dbt_token),
 ):
     """Proxy a dbt session query through the backend for history tracking."""
     rewritten_sql = rewrite(req.sql)
@@ -214,7 +223,7 @@ async def session_query_proxy(
     async with async_session() as session:
         session.add(QueryJob(
             id=job_id,
-            user_id=req.user_id,
+            user_id=user_id,
             sql=req.sql,
             status="running",
             started_at=now,
@@ -278,7 +287,7 @@ class DropObjectRequest(BaseModel):
 
 
 @router.post("/drop-object")
-async def drop_object(req: DropObjectRequest, _: None = Depends(_verify_token)):
+async def drop_object(req: DropObjectRequest, _user_id: int = Depends(_verify_dbt_token)):
     """Remove a catalog object. If table, also drops from Iceberg."""
     async with async_session() as session:
         db_result = await session.execute(

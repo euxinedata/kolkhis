@@ -143,6 +143,15 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class UserApiToken(Base):
+    __tablename__ = "user_api_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class BillingPeriod(Base):
     __tablename__ = "billing_periods"
 
