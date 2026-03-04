@@ -17,7 +17,9 @@ import 'react-complex-tree/lib/style-modern.css'
 import { apiFetch } from '../api'
 import Terminal from '../components/Terminal'
 import { CatalogPanel } from '../components/CatalogPanel'
+import { useStatusBar } from '../StatusBarContext'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
+import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
 import './ProjectEditor.css'
 
 interface Project {
@@ -334,6 +336,8 @@ export function ProjectEditor() {
   const [activeTerminalTab, setActiveTerminalTab] = useState<number | null>(savedSession?.activeTerminalTab ?? null)
   const [terminalHeight, setTerminalHeight] = useState(savedSession?.terminalHeight ?? 200)
   const [treeWidth, setTreeWidth] = useState(savedSession?.treeWidth ?? 240)
+
+  const { setLeft, setRight } = useStatusBar()
   const nextTerminalId = useRef(savedSession?.nextTerminalId ?? 1)
 
   // Refs for unmount save (must track latest values)
@@ -351,6 +355,10 @@ export function ProjectEditor() {
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [contextTarget, setContextTarget] = useState<string | null>(null)
+
+  // Editor tab context menu state
+  const [editorTabContextMenu, setEditorTabContextMenu] = useState<{ x: number; y: number; path: string } | null>(null)
+  const [editorTabOverflowOpen, setEditorTabOverflowOpen] = useState(false)
 
   // Terminal context menu / rename state
   const [termContextMenu, setTermContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null)
@@ -518,17 +526,53 @@ export function ProjectEditor() {
     }
   }, [termContextMenu])
 
+  // Close editor tab context menu on click outside or Escape
+  useEffect(() => {
+    if (!editorTabContextMenu) return
+    const handleClick = () => setEditorTabContextMenu(null)
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEditorTabContextMenu(null)
+    }
+    document.addEventListener('click', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('click', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [editorTabContextMenu])
+
+  // Editor tab overflow dropdown dismiss
+  useEffect(() => {
+    if (!editorTabOverflowOpen) return
+    const handleClick = (e: MouseEvent) => {
+      const wrapper = (e.target as HTMLElement).closest('.tab-overflow-wrapper')
+      if (wrapper) return
+      setEditorTabOverflowOpen(false)
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditorTabOverflowOpen(false) }
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', handleClick)
+      document.addEventListener('keydown', handleKey)
+    })
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [editorTabOverflowOpen])
+
   // Ctrl+` toggle terminal
+  const toggleTerminalRef = useRef(toggleTerminal)
+  toggleTerminalRef.current = toggleTerminal
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
-        toggleTerminal()
+        toggleTerminalRef.current()
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }) // intentionally no deps — toggleTerminal uses latest state
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag resize handler
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
@@ -623,6 +667,21 @@ export function ProjectEditor() {
     })
   }
 
+  function closeEditorTabs(filter: (tab: OpenTab, idx: number) => boolean) {
+    setOpenTabs(prev => {
+      const next = prev.filter((t, i) => !filter(t, i))
+      if (activeTab && !next.find(t => t.path === activeTab)) {
+        if (next.length > 0) {
+          setActiveTab(next[next.length - 1].path)
+        } else {
+          setActiveTab(null)
+        }
+      }
+      return next
+    })
+    setEditorTabContextMenu(null)
+  }
+
   async function saveActiveTab() {
     const currentActive = activeTabRef.current
     const currentTabs = openTabsRef.current
@@ -678,6 +737,24 @@ export function ProjectEditor() {
       }
     }
   }
+
+  // Status bar content
+  useEffect(() => {
+    const label = activeTab
+      ? activeTab.startsWith('__catalog__:') ? activeTab.replace('__catalog__:', '') : activeTab
+      : null
+    setLeft(label ? <span className="status-bar-item">{label}</span> : null)
+    setRight(
+      <button
+        className={`status-bar-btn${terminalOpen ? ' active' : ''}`}
+        onClick={toggleTerminal}
+        title="Toggle Terminal (Ctrl+`)"
+      >
+        Terminal
+      </button>
+    )
+    return () => { setLeft(null); setRight(null) }
+  }, [activeTab, terminalOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleTerminalContextMenu(e: React.MouseEvent, tabId: number) {
     e.preventDefault()
@@ -974,6 +1051,7 @@ export function ProjectEditor() {
           <div className="editor-area">
             {openTabs.length > 0 && (
               <div className="editor-tabs">
+                <div className="editor-tabs-inner">
                 {openTabs.map(tab => {
                   const isCatalog = tab.tabType && tab.tabType !== 'file'
                   const dirty = !isCatalog && tab.content !== tab.savedContent
@@ -993,6 +1071,7 @@ export function ProjectEditor() {
                       className={`editor-tab${tab.path === activeTab ? ' active' : ''}`}
                       title={isCatalog ? tab.path.replace('__catalog__:', '') : tab.path}
                       onClick={() => { flushEditorState(); setActiveTab(tab.path) }}
+                      onContextMenu={e => { e.preventDefault(); setEditorTabContextMenu({ x: e.clientX, y: e.clientY, path: tab.path }) }}
                     >
                       {badgeLabel && (
                         <span className={`query-tab-badge query-tab-badge-${badgeType}`}>{badgeLabel}</span>
@@ -1002,11 +1081,49 @@ export function ProjectEditor() {
                         className={`editor-tab-close${dirty ? ' dirty' : ''}`}
                         onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
                       >
-                        {dirty ? <span className="editor-tab-dot">●</span> : '×'}
+                        {dirty ? <span className="editor-tab-dot">●</span> : '✕'}
                       </span>
                     </div>
                   )
                 })}
+                </div>
+                <div className="tab-overflow-wrapper">
+                  <button className="tab-overflow-btn" onClick={() => setEditorTabOverflowOpen(v => !v)} title="Open tabs">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                  {editorTabOverflowOpen && (
+                    <div className="tab-overflow-dropdown">
+                      {openTabs.map(tab => {
+                        const isCat = tab.tabType && tab.tabType !== 'file'
+                        const d = !isCat && tab.content !== tab.savedContent
+                        const n = isCat
+                          ? tab.path.replace('__catalog__:', '')
+                          : (tab.path.includes('/') ? tab.path.split('/').pop()! : tab.path)
+                        const bMap: Record<string, string> = { database: 'DB', schema: 'S', table: 'T', view: 'V' }
+                        const bLabel = isCat
+                          ? (tab.tabType === 'object' ? bMap[tab.objectType ?? 'table'] : bMap[tab.tabType!])
+                          : null
+                        const bType = isCat
+                          ? (tab.tabType === 'object' ? tab.objectType : tab.tabType)
+                          : null
+                        return (
+                          <div
+                            key={tab.path}
+                            className={`tab-overflow-item${tab.path === activeTab ? ' active' : ''}`}
+                            onClick={() => { flushEditorState(); setActiveTab(tab.path); setEditorTabOverflowOpen(false) }}
+                          >
+                            {bLabel && <span className={`query-tab-badge query-tab-badge-${bType}`}>{bLabel}</span>}
+                            <span className="tab-overflow-item-name">{d ? `${n} ●` : n}</span>
+                            <span
+                              className="tab-overflow-item-close"
+                              onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
+                            >✕</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             <div className="file-editor-content">
@@ -1029,7 +1146,8 @@ export function ProjectEditor() {
                     path={activeTab}
                     language={languageForPath(activeTab)}
                     value={openTabs.find(t => t.path === activeTab)?.content ?? ''}
-                    theme="vs-dark"
+                    beforeMount={defineKolkhisTheme}
+                    theme={THEME_NAME}
                     onChange={(value) => {
                       setOpenTabs(prev => prev.map(t =>
                         t.path === activeTab ? { ...t, content: value ?? '' } : t
@@ -1095,7 +1213,7 @@ export function ProjectEditor() {
                       <span
                         className="terminal-tab-close"
                         onClick={e => { e.stopPropagation(); closeTerminal(tab.id) }}
-                      >×</span>
+                      >✕</span>
                     </div>
                   ))}
                   <button className="terminal-tab-add" onClick={addTerminal}>+</button>
@@ -1117,24 +1235,6 @@ export function ProjectEditor() {
               </div>
             </>
           )}
-        </div>
-      </div>
-      <div className="status-bar">
-        <div className="status-bar-left">
-          {activeTab && (
-            <span className="status-bar-item">
-              {activeTab.startsWith('__catalog__:') ? activeTab.replace('__catalog__:', '') : activeTab}
-            </span>
-          )}
-        </div>
-        <div className="status-bar-right">
-          <button
-            className={`status-bar-btn${terminalOpen ? ' active' : ''}`}
-            onClick={toggleTerminal}
-            title="Toggle Terminal (Ctrl+`)"
-          >
-            Terminal
-          </button>
         </div>
       </div>
 
@@ -1175,6 +1275,24 @@ export function ProjectEditor() {
           </div>
         </div>
       )}
+
+      {editorTabContextMenu && (() => {
+        const idx = openTabs.findIndex(t => t.path === editorTabContextMenu.path)
+        return (
+          <div className="context-menu" style={{ left: editorTabContextMenu.x, top: editorTabContextMenu.y }}>
+            <div className="context-menu-item" onClick={() => closeEditorTabs(t => t.path === editorTabContextMenu.path)}>Close</div>
+            <div className="context-menu-item" onClick={() => closeEditorTabs(t => t.path !== editorTabContextMenu.path)}>Close Other Tabs</div>
+            <div className="context-menu-item" onClick={() => closeEditorTabs(() => true)}>Close All Tabs</div>
+            <div className="context-menu-item" onClick={() => closeEditorTabs(t => {
+              const isCatalog = t.tabType && t.tabType !== 'file'
+              return !!(isCatalog || t.content === t.savedContent)
+            })}>Close Unmodified Tabs</div>
+            <div className="context-menu-separator" />
+            <div className="context-menu-item" onClick={() => closeEditorTabs((_t, i) => i < idx)}>Close Tabs to the Left</div>
+            <div className="context-menu-item" onClick={() => closeEditorTabs((_t, i) => i > idx)}>Close Tabs to the Right</div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
