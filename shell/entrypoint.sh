@@ -9,10 +9,10 @@ if [ ! -f "$AUTH_DIR/passwd" ]; then
     chmod 640 "$AUTH_DIR/shadow" "$AUTH_DIR/gshadow"
 fi
 
-# Initial copy to /etc/
-cp "$AUTH_DIR"/{passwd,shadow,group,gshadow} /etc/
-
-# Background sync: pick up new users added by backend
-(while true; do sleep 5; cp "$AUTH_DIR"/{passwd,shadow,group,gshadow} /etc/; done) &
+# Symlink /etc auth files to PV so sshd always reads the latest
+ln -sf "$AUTH_DIR/passwd" /etc/passwd
+ln -sf "$AUTH_DIR/shadow" /etc/shadow
+ln -sf "$AUTH_DIR/group" /etc/group
+ln -sf "$AUTH_DIR/gshadow" /etc/gshadow
 
 exec /usr/sbin/sshd -D -e
