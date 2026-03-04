@@ -83,7 +83,6 @@ services:
       - "2222:22"
     volumes:
       - ./backend/data/homes:/home
-      - ./shell/keys/id_ed25519.pub:/home/shelluser/.ssh/authorized_keys:ro
 
 volumes:
   pgdata:

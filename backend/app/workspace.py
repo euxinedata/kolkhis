@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import HOMES_PATH, GITEA_URL, GITEA_SHELL_URL, GITEA_ADMIN_USER
-from app.shell import _run_ssh_command
+from app.shell import chown_recursive, get_uid_for_user
 
 
 def _repo_path(shell_username: str, repo_name: str) -> Path:
@@ -58,9 +58,9 @@ async def clone_repo(shell_username: str, repo_name: str, user_name: str = "", u
     if user_email:
         await _run_git("config", "user.email", user_email, cwd=dest)
     # Fix ownership so the shell user can write to the repo
-    await _run_ssh_command(
-        f"sudo chown -R {shell_username}:{shell_username} /home/{shell_username}/projects/{repo_name}"
-    )
+    uid = get_uid_for_user(shell_username)
+    if uid is not None:
+        chown_recursive(dest, uid, uid)
 
 
 async def ensure_clone(shell_username: str, repo_name: str, user_name: str = "", user_email: str = "") -> None:
