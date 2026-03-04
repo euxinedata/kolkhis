@@ -220,12 +220,10 @@ function WorkerIndicator() {
 
   return (
     <div className="worker-indicator" onClick={() => navigate('/resources')}>
-      <div
+      <img
+        src={`/worker-icons/${birdKey}.svg`}
+        alt={info?.bird ?? 'worker'}
         className={`worker-icon worker-${worker.status}`}
-        style={{
-          maskImage: `url(/worker-icons/${birdKey}.svg)`,
-          WebkitMaskImage: `url(/worker-icons/${birdKey}.svg)`,
-        }}
       />
       <div className="worker-tooltip">{tooltip}</div>
     </div>
