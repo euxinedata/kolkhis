@@ -29,6 +29,7 @@ from app.config import (
 )
 from app.database import async_session
 from app.models import CatalogObject, Database, QueryJob, Schema, WorkerVM
+from app.sql_rewriter import rewrite
 from app.warehouse import catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -484,6 +485,7 @@ async def _execute_local_worker(job_id: str, sql: str):
 
 
 async def execute_query(job_id: str, sql: str, user_id: int = 0):
+    sql = rewrite(sql)
     await _update_job(job_id, started_at=datetime.utcnow())
     try:
         # Intercept CREATE VIEW DDL — persist in catalog, skip DuckDB
