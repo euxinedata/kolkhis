@@ -610,18 +610,21 @@
 }
 
 .worker-icon {
-  width: 24px;
+  display: block;
+  width: auto;
   height: 16px;
-  mask-size: contain;
-  mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
+  flex-shrink: 0;
 }
 
-.worker-icon.worker-ready { background-color: #4ade80; }
-.worker-icon.worker-provisioning { background-color: #fbbf24; }
+/* Green tint for ready: brightness(0) makes it black, then invert+sepia+hue-rotate to target green */
+.worker-icon.worker-ready {
+  filter: brightness(0) saturate(100%) invert(76%) sepia(40%) saturate(555%) hue-rotate(88deg) brightness(95%) contrast(90%);
+}
+
+/* Yellow tint for provisioning */
+.worker-icon.worker-provisioning {
+  filter: brightness(0) saturate(100%) invert(78%) sepia(60%) saturate(600%) hue-rotate(5deg) brightness(100%) contrast(95%);
+}
 
 .worker-indicator .worker-tooltip {
   display: none;
