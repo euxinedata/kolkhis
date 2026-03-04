@@ -4,15 +4,16 @@
 <svg
    version="1.1"
    id="svg1"
-   width="1536"
-   height="1024"
-   viewBox="0 0 1536 1024"
+   width="40"
+   height="28"
+   viewBox="0 0 40 28"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs
      id="defs1" />
   <g
-     id="layer1">
+     id="layer1"
+     transform="matrix(0.965503,0,0,0.965503,1.8461538,0.65822459)">
     <path
        id="path4-3"
        style="display:inline;fill:currentColor;stroke-width:0.127234"
