@@ -80,5 +80,6 @@ SHELL_WORKER_URL = os.environ.get("SHELL_WORKER_URL", "http://host.docker.intern
 
 SHELL_SSH_HOST = os.environ.get("SHELL_SSH_HOST", "localhost")
 SHELL_SSH_PORT = int(os.environ.get("SHELL_SSH_PORT", "2222"))
-SHELL_SSH_USER = os.environ.get("SHELL_SSH_USER", "shelluser")
-SHELL_SSH_KEY_PATH = os.environ.get("SHELL_SSH_KEY_PATH", str(Path(__file__).resolve().parent.parent.parent / "shell" / "keys" / "id_ed25519"))
+_default_key_path = Path(__file__).resolve().parent.parent.parent / "shell" / "keys" / "id_ed25519"
+SHELL_SSH_KEY_PATH = os.environ.get("SHELL_SSH_KEY_PATH", str(_default_key_path))
+SHELL_SSH_PUBKEY_PATH = os.environ.get("SHELL_SSH_PUBKEY_PATH", str(_default_key_path.with_suffix(".pub")))
