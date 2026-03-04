@@ -402,11 +402,13 @@
   background: #080808;
   border-bottom: 1px solid #1e1e1e;
   flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.query-tabs::-webkit-scrollbar {
-  display: none;
+
+.query-tabs-inner {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .query-tab {
@@ -675,4 +677,123 @@
 
 .modal-btn-confirm:hover {
   background: rgba(248, 113, 113, 0.25);
+}
+
+/* Context menu (shared across editors) */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #151515;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 3px 0;
+  min-width: 140px;
+  font-size: 12px;
+}
+
+.context-menu-item {
+  padding: 4px 9px;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: #1e1e1e;
+  color: #fff;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: #2a2a2a;
+  margin: 3px 0;
+}
+
+/* Tab overflow dropdown */
+.tab-overflow-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-left: 1px solid #1e1e1e;
+}
+
+.tab-overflow-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 100%;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.tab-overflow-btn:hover {
+  color: #ccc;
+  background: #1e1e1e;
+  border: none;
+}
+
+.tab-overflow-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1000;
+  background: #151515;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  padding: 3px 0;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tab-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab-overflow-item:hover {
+  background: #1e1e1e;
+}
+
+.tab-overflow-item.active {
+  background: #1a3a5c;
+  color: #fff;
+}
+
+.tab-overflow-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-overflow-item-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  font-size: 8px;
+  color: #666;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tab-overflow-item-close:hover {
+  color: #ccc;
+  background: #2a2a2a;
 }

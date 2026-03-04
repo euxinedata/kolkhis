@@ -64,8 +64,8 @@ export function QueryEditor() {
   // Tab state
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([QUERY_TAB])
   const [activeTab, setActiveTab] = useState('__query__')
-
-
+  const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
+  const [tabOverflowOpen, setTabOverflowOpen] = useState(false)
 
   const statusBarLabel = openTabs.find(t => t.id === activeTab)?.id === '__query__' ? 'Query' : activeTab
   const statusBarLeft = useMemo(() => <span className="status-bar-item">{statusBarLabel}</span>, [statusBarLabel])
@@ -232,6 +232,49 @@ export function QueryEditor() {
     if (activeTab === tabId) setActiveTab('__query__')
   }
 
+  // Tab context menu dismiss
+  useEffect(() => {
+    if (!tabContextMenu) return
+    const handleClick = () => setTabContextMenu(null)
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTabContextMenu(null) }
+    document.addEventListener('click', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('click', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [tabContextMenu])
+
+  // Tab overflow dropdown dismiss
+  useEffect(() => {
+    if (!tabOverflowOpen) return
+    const handleClick = (e: MouseEvent) => {
+      const wrapper = (e.target as HTMLElement).closest('.tab-overflow-wrapper')
+      if (wrapper) return
+      setTabOverflowOpen(false)
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTabOverflowOpen(false) }
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', handleClick)
+      document.addEventListener('keydown', handleKey)
+    })
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [tabOverflowOpen])
+
+  function closeTabs(filter: (tab: OpenTab, idx: number) => boolean) {
+    setOpenTabs(prev => {
+      const next = prev.filter((t, i) => t.id === '__query__' || !filter(t, i))
+      if (!next.find(t => t.id === activeTab)) {
+        setActiveTab('__query__')
+      }
+      return next
+    })
+    setTabContextMenu(null)
+  }
+
   const handleResultsResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const startY = e.clientY
@@ -290,11 +333,13 @@ export function QueryEditor() {
       <div className="query-main">
         {/* Tab bar */}
         <div className="query-tabs">
+          <div className="query-tabs-inner">
           {openTabs.map(tab => (
             <div
               key={tab.id}
               className={`query-tab ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.id)}
+              onContextMenu={e => { e.preventDefault(); setTabContextMenu({ x: e.clientX, y: e.clientY, tabId: tab.id }) }}
             >
               <span className={`query-tab-badge query-tab-badge-${tab.type === 'object' ? tab.objectType : tab.type}`}>
                 {{ query: 'Q', database: 'DB', schema: 'S', object: tab.objectType === 'view' ? 'V' : 'T' }[tab.type]}
@@ -310,6 +355,31 @@ export function QueryEditor() {
               )}
             </div>
           ))}
+          </div>
+          <div className="tab-overflow-wrapper">
+            <button className="tab-overflow-btn" onClick={() => setTabOverflowOpen(v => !v)} title="Open tabs">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            {tabOverflowOpen && (
+              <div className="tab-overflow-dropdown">
+                {openTabs.map(tab => (
+                  <div
+                    key={tab.id}
+                    className={`tab-overflow-item${activeTab === tab.id ? ' active' : ''}`}
+                    onClick={() => { setActiveTab(tab.id); setTabOverflowOpen(false) }}
+                  >
+                    <span className={`query-tab-badge query-tab-badge-${tab.type === 'object' ? tab.objectType : tab.type}`}>
+                      {{ query: 'Q', database: 'DB', schema: 'S', object: tab.objectType === 'view' ? 'V' : 'T' }[tab.type]}
+                    </span>
+                    <span className="tab-overflow-item-name">{tab.label}</span>
+                    {tab.type !== 'query' && (
+                      <span className="tab-overflow-item-close" onClick={e => { e.stopPropagation(); closeTab(tab.id) }}>✕</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Query tab content */}
@@ -444,6 +514,25 @@ export function QueryEditor() {
         ))}
       </div>
     </div>
+
+    {tabContextMenu && (() => {
+      const idx = openTabs.findIndex(t => t.id === tabContextMenu.tabId)
+      const isQuery = tabContextMenu.tabId === '__query__'
+      return (
+        <div className="context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }}>
+          {!isQuery && (
+            <div className="context-menu-item" onClick={() => { closeTabs(t => t.id === tabContextMenu.tabId) }}>Close</div>
+          )}
+          <div className="context-menu-item" onClick={() => { closeTabs(t => t.id !== tabContextMenu.tabId) }}>Close Other Tabs</div>
+          <div className="context-menu-item" onClick={() => { closeTabs(() => true) }}>Close All Tabs</div>
+          <div className="context-menu-item" onClick={() => { closeTabs(() => true) }}>Close Unmodified Tabs</div>
+          <div className="context-menu-separator" />
+          <div className="context-menu-item" onClick={() => { closeTabs((_t, i) => i < idx) }}>Close Tabs to the Left</div>
+          <div className="context-menu-item" onClick={() => { closeTabs((_t, i) => i > idx) }}>Close Tabs to the Right</div>
+        </div>
+      )
+    })()}
+
     </div>
   )
 }
