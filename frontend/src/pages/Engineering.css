@@ -7,7 +7,7 @@
 .eng-tabs {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
   margin-bottom: 1.5em;
 }
 
@@ -15,7 +15,7 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #8888bb;
+  color: #909090;
   font-size: 0.9em;
   padding: 0.5em 1em;
   cursor: pointer;
@@ -29,8 +29,8 @@
 }
 
 .eng-tab.active {
-  color: #646cff;
-  border-bottom-color: #646cff;
+  color: #d4850a;
+  border-bottom-color: #d4850a;
 }
 
 .eng-tab:disabled {
@@ -56,7 +56,7 @@
 }
 
 .project-card {
-  border: 1px solid #2a2a4a;
+  border: 1px solid #1e1e1e;
   border-radius: 6px;
   padding: 1em;
   display: flex;
@@ -78,7 +78,7 @@
 
 .project-card-desc {
   font-size: 0.82em;
-  color: #8888bb;
+  color: #909090;
   margin: 0;
 }
 
@@ -110,7 +110,7 @@
 .eng-form-field label {
   display: block;
   font-size: 0.8em;
-  color: #8888bb;
+  color: #909090;
   margin-bottom: 0.3em;
 }
 
@@ -119,7 +119,7 @@
   box-sizing: border-box;
   padding: 0.4em 0.6em;
   font-size: 0.9em;
-  background: #16162a;
+  background: #0e0e0e;
   border: 1px solid #333;
   border-radius: 4px;
   color: #ccc;
@@ -127,7 +127,7 @@
 
 .eng-form-field input:focus {
   outline: none;
-  border-color: #646cff;
+  border-color: #d4850a;
 }
 
 .eng-create-btn {
@@ -140,36 +140,3 @@
   cursor: default;
 }
 
-/* Light mode */
-@media (prefers-color-scheme: light) {
-  .eng-tabs {
-    border-bottom-color: #e0e0ea;
-  }
-  .eng-tab {
-    color: #666688;
-  }
-  .eng-tab:hover:not(:disabled) {
-    color: #213547;
-  }
-  .eng-tab.active {
-    color: #4a50c8;
-    border-bottom-color: #4a50c8;
-  }
-  .eng-tab:disabled {
-    color: #bbb;
-  }
-  .project-card {
-    border-color: #e0e0ea;
-  }
-  .project-card-name {
-    color: #333;
-  }
-  .project-card-desc {
-    color: #666688;
-  }
-  .eng-form-field input {
-    background: #f5f5fa;
-    border-color: #ddd;
-    color: #333;
-  }
-}

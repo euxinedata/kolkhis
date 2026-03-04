@@ -14,7 +14,7 @@
 
 .settings-hint {
   font-size: 0.8em;
-  color: #8888bb;
+  color: #909090;
   margin: 0.3em 0 1em;
 }
 
@@ -28,30 +28,30 @@
   width: 80px;
   padding: 0.4em 0.6em;
   font-size: 0.9em;
-  background: #16162a;
-  border: 1px solid #2a2a4a;
+  background: #0e0e0e;
+  border: 1px solid #1e1e1e;
   border-radius: 4px;
   color: rgba(255, 255, 255, 0.87);
 }
 
 .settings-input:focus {
   outline: none;
-  border-color: #646cff;
+  border-color: #d4850a;
 }
 
 .settings-select {
   padding: 0.4em 0.6em;
   font-size: 1em;
-  font-family: monospace;
-  background: #16162a;
-  border: 1px solid #2a2a4a;
+  font-family: 'Geist Mono', monospace;
+  background: #0e0e0e;
+  border: 1px solid #1e1e1e;
   border-radius: 4px;
   color: rgba(255, 255, 255, 0.87);
 }
 
 .settings-select:focus {
   outline: none;
-  border-color: #646cff;
+  border-color: #d4850a;
 }
 
 .settings-actions {
@@ -81,8 +81,8 @@
 }
 
 .settings-modal {
-  background: #1a1a2e;
-  border: 1px solid #2a2a4a;
+  background: #0a0a0a;
+  border: 1px solid #1e1e1e;
   border-radius: 8px;
   padding: 1.5em;
   max-width: 420px;
@@ -98,7 +98,7 @@
 
 .settings-modal-text {
   font-size: 0.85em;
-  color: #8888bb;
+  color: #909090;
   margin: 0 0 1.2em;
 }
 
@@ -109,36 +109,11 @@
 
 .settings-modal-actions button.secondary {
   background: transparent;
-  border: 1px solid #2a2a4a;
+  border: 1px solid #1e1e1e;
   color: rgba(255, 255, 255, 0.67);
 }
 
 .settings-modal-actions button.secondary:hover {
-  border-color: #646cff;
+  border-color: #d4850a;
 }
 
-@media (prefers-color-scheme: light) {
-  .settings-input,
-  .settings-select {
-    background: #f5f5fa;
-    border-color: #e0e0ea;
-    color: #213547;
-  }
-  .settings-label {
-    color: #213547;
-  }
-  .settings-modal {
-    background: #ffffff;
-    border-color: #e0e0ea;
-  }
-  .settings-modal-title {
-    color: #213547;
-  }
-  .settings-modal-text {
-    color: #666;
-  }
-  .settings-modal-actions button.secondary {
-    border-color: #e0e0ea;
-    color: #666;
-  }
-}

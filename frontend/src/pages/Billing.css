@@ -4,7 +4,7 @@
 
 .billing-period-label {
   font-size: 0.85em;
-  color: #8888bb;
+  color: #909090;
   margin: 0.5em 0 1.5em;
 }
 
@@ -17,7 +17,7 @@
 
 .billing-total-label {
   font-size: 0.8em;
-  color: #8888bb;
+  color: #909090;
   margin: 0 0 1.5em;
 }
 
@@ -29,15 +29,15 @@
 
 .billing-table th {
   text-align: left;
-  color: #8888bb;
+  color: #909090;
   font-weight: 600;
   padding: 0.5em 0.75em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
 }
 
 .billing-table td {
   padding: 0.5em 0.75em;
-  border-bottom: 1px solid #1e1e3a;
+  border-bottom: 1px solid #151515;
   color: rgba(255, 255, 255, 0.87);
 }
 
@@ -61,12 +61,12 @@
   display: flex;
   justify-content: space-between;
   padding: 0.4em 0;
-  border-bottom: 1px solid #1e1e3a;
+  border-bottom: 1px solid #151515;
   font-size: 0.85em;
 }
 
 .billing-history-period {
-  color: #8888bb;
+  color: #909090;
 }
 
 .billing-history-cost {
@@ -74,21 +74,3 @@
   font-variant-numeric: tabular-nums;
 }
 
-@media (prefers-color-scheme: light) {
-  .billing-total {
-    color: #213547;
-  }
-  .billing-table th {
-    border-bottom-color: #e0e0ea;
-  }
-  .billing-table td {
-    color: #213547;
-    border-bottom-color: #f0f0f5;
-  }
-  .billing-history-row {
-    border-bottom-color: #f0f0f5;
-  }
-  .billing-history-cost {
-    color: #213547;
-  }
-}
