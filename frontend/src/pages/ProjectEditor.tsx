@@ -19,6 +19,7 @@ import Terminal from '../components/Terminal'
 import { CatalogPanel } from '../components/CatalogPanel'
 import { useStatusBar } from '../StatusBarContext'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
+import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
 import './ProjectEditor.css'
 
 interface Project {
@@ -522,16 +523,18 @@ export function ProjectEditor() {
   }, [termContextMenu])
 
   // Ctrl+` toggle terminal
+  const toggleTerminalRef = useRef(toggleTerminal)
+  toggleTerminalRef.current = toggleTerminal
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
-        toggleTerminal()
+        toggleTerminalRef.current()
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }) // intentionally no deps — toggleTerminal uses latest state
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drag resize handler
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
@@ -698,7 +701,7 @@ export function ProjectEditor() {
       </button>
     )
     return () => { setLeft(null); setRight(null) }
-  })
+  }, [activeTab, terminalOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleTerminalContextMenu(e: React.MouseEvent, tabId: number) {
     e.preventDefault()
@@ -1023,7 +1026,7 @@ export function ProjectEditor() {
                         className={`editor-tab-close${dirty ? ' dirty' : ''}`}
                         onClick={e => { e.stopPropagation(); closeTab(tab.path) }}
                       >
-                        {dirty ? <span className="editor-tab-dot">●</span> : '×'}
+                        {dirty ? <span className="editor-tab-dot">●</span> : '✕'}
                       </span>
                     </div>
                   )
@@ -1050,7 +1053,8 @@ export function ProjectEditor() {
                     path={activeTab}
                     language={languageForPath(activeTab)}
                     value={openTabs.find(t => t.path === activeTab)?.content ?? ''}
-                    theme="vs-dark"
+                    beforeMount={defineKolkhisTheme}
+                    theme={THEME_NAME}
                     onChange={(value) => {
                       setOpenTabs(prev => prev.map(t =>
                         t.path === activeTab ? { ...t, content: value ?? '' } : t
@@ -1116,7 +1120,7 @@ export function ProjectEditor() {
                       <span
                         className="terminal-tab-close"
                         onClick={e => { e.stopPropagation(); closeTerminal(tab.id) }}
-                      >×</span>
+                      >✕</span>
                     </div>
                   ))}
                   <button className="terminal-tab-add" onClick={addTerminal}>+</button>

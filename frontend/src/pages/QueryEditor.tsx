@@ -6,6 +6,7 @@ import { apiFetch, API_URL } from '../api'
 import { CatalogPanel } from '../components/CatalogPanel'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
 import { useStatusBarEffect } from '../StatusBarContext'
+import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
 
 interface QueryResult {
   columns: string[]
@@ -64,7 +65,7 @@ export function QueryEditor() {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([QUERY_TAB])
   const [activeTab, setActiveTab] = useState('__query__')
 
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+
 
   const statusBarLabel = openTabs.find(t => t.id === activeTab)?.id === '__query__' ? 'Query' : activeTab
   const statusBarLeft = useMemo(() => <span className="status-bar-item">{statusBarLabel}</span>, [statusBarLabel])
@@ -330,7 +331,8 @@ export function QueryEditor() {
                 <Editor
                   height="100%"
                   language="sql"
-                  theme={prefersDark ? 'vs-dark' : 'vs'}
+                  beforeMount={defineKolkhisTheme}
+                  theme={THEME_NAME}
                   value={sql}
                   onChange={(value) => { const v = value || ''; setSql(v); localStorage.setItem('kolkhis_sql', v) }}
                   onMount={handleEditorMount}
