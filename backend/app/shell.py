@@ -123,7 +123,17 @@ def provision_shell_user(shell_username: str) -> None:
     # Minimal skel files
     bashrc = home / ".bashrc"
     if not bashrc.exists():
-        bashrc.write_text("# ~/.bashrc\n[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n")
+        bashrc.write_text(
+            "# ~/.bashrc\n"
+            "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n"
+            "\n"
+            "# Colored prompt: user@host:dir$\n"
+            "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '\n"
+            "\n"
+            "# Colors for ls and grep\n"
+            "alias ls='ls --color=auto'\n"
+            "alias grep='grep --color=auto'\n"
+        )
 
     profile = home / ".profile"
     if not profile.exists():
