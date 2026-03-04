@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Editor, type Monaco } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { apiFetch, API_URL } from '../api'
 import { CatalogPanel } from '../components/CatalogPanel'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
+import { useStatusBarEffect } from '../StatusBarContext'
 
 interface QueryResult {
   columns: string[]
@@ -64,6 +65,11 @@ export function QueryEditor() {
   const [activeTab, setActiveTab] = useState('__query__')
 
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+
+  const statusBarLabel = openTabs.find(t => t.id === activeTab)?.id === '__query__' ? 'Query' : activeTab
+  const statusBarLeft = useMemo(() => <span className="status-bar-item">{statusBarLabel}</span>, [statusBarLabel])
+  const statusBarRight = useMemo(() => status ? <span className={`status-bar-item status-${status}`}>{status}</span> : null, [status])
+  useStatusBarEffect(statusBarLeft, statusBarRight)
 
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -434,20 +440,6 @@ export function QueryEditor() {
             )
           )
         ))}
-      </div>
-    </div>
-    <div className="status-bar">
-      <div className="status-bar-left">
-        <span className="status-bar-item">
-          {openTabs.find(t => t.id === activeTab)?.id === '__query__'
-            ? 'Query'
-            : activeTab}
-        </span>
-      </div>
-      <div className="status-bar-right">
-        {status && (
-          <span className={`status-bar-item status-${status}`}>{status}</span>
-        )}
       </div>
     </div>
     </div>

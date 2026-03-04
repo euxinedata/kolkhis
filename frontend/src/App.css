@@ -24,7 +24,6 @@
 .login-logo {
   width: 96px;
   height: 96px;
-  filter: invert(1);
 }
 .login-subtitle {
   color: #909090;
@@ -59,7 +58,6 @@
 .nav-logo {
   width: 24px;
   height: 24px;
-  filter: invert(1);
 }
 .nav-user {
   margin-left: auto;
@@ -131,6 +129,10 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   padding: 0.4em 0;
   z-index: 50;
+}
+.sidebar-bottom .sidebar-flyout {
+  top: auto;
+  bottom: 0;
 }
 .sidebar-item:hover .sidebar-flyout {
   display: block;
@@ -563,8 +565,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 22px;
-  padding: 0 0.5em;
+  height: 28px;
+  padding: 0 0.75em;
   background: #080808;
   border-top: 1px solid #1e1e1e;
   flex-shrink: 0;

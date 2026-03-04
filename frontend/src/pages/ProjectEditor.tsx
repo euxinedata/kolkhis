@@ -17,6 +17,7 @@ import 'react-complex-tree/lib/style-modern.css'
 import { apiFetch } from '../api'
 import Terminal from '../components/Terminal'
 import { CatalogPanel } from '../components/CatalogPanel'
+import { useStatusBar } from '../StatusBarContext'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
 import './ProjectEditor.css'
 
@@ -334,6 +335,8 @@ export function ProjectEditor() {
   const [activeTerminalTab, setActiveTerminalTab] = useState<number | null>(savedSession?.activeTerminalTab ?? null)
   const [terminalHeight, setTerminalHeight] = useState(savedSession?.terminalHeight ?? 200)
   const [treeWidth, setTreeWidth] = useState(savedSession?.treeWidth ?? 240)
+
+  const { setLeft, setRight } = useStatusBar()
   const nextTerminalId = useRef(savedSession?.nextTerminalId ?? 1)
 
   // Refs for unmount save (must track latest values)
@@ -678,6 +681,24 @@ export function ProjectEditor() {
       }
     }
   }
+
+  // Status bar content
+  useEffect(() => {
+    const label = activeTab
+      ? activeTab.startsWith('__catalog__:') ? activeTab.replace('__catalog__:', '') : activeTab
+      : null
+    setLeft(label ? <span className="status-bar-item">{label}</span> : null)
+    setRight(
+      <button
+        className={`status-bar-btn${terminalOpen ? ' active' : ''}`}
+        onClick={toggleTerminal}
+        title="Toggle Terminal (Ctrl+`)"
+      >
+        Terminal
+      </button>
+    )
+    return () => { setLeft(null); setRight(null) }
+  })
 
   function handleTerminalContextMenu(e: React.MouseEvent, tabId: number) {
     e.preventDefault()
@@ -1117,24 +1138,6 @@ export function ProjectEditor() {
               </div>
             </>
           )}
-        </div>
-      </div>
-      <div className="status-bar">
-        <div className="status-bar-left">
-          {activeTab && (
-            <span className="status-bar-item">
-              {activeTab.startsWith('__catalog__:') ? activeTab.replace('__catalog__:', '') : activeTab}
-            </span>
-          )}
-        </div>
-        <div className="status-bar-right">
-          <button
-            className={`status-bar-btn${terminalOpen ? ' active' : ''}`}
-            onClick={toggleTerminal}
-            title="Toggle Terminal (Ctrl+`)"
-          >
-            Terminal
-          </button>
         </div>
       </div>
 

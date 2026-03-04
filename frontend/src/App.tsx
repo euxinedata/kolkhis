@@ -9,7 +9,8 @@ import { Engineering } from './pages/Engineering.tsx'
 import { ProjectEditor } from './pages/ProjectEditor.tsx'
 import { Placeholder } from './pages/Placeholder.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
-import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Settings as SettingsIcon } from 'lucide-react'
+import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Logs, Settings as SettingsIcon } from 'lucide-react'
+import { StatusBarProvider, useStatusBar } from './StatusBarContext.tsx'
 import './App.css'
 
 type View = 'analytics' | 'engineering' | 'reporting'
@@ -47,6 +48,7 @@ function App() {
   }
 
   return (
+    <StatusBarProvider>
     <div className="app">
       <nav className="app-nav">
         <span className="app-title">
@@ -72,7 +74,6 @@ function App() {
               <div className="sidebar-flyout">
                 <div className="sidebar-flyout-title">Analytics</div>
                 <NavLink to="/" end className="sidebar-flyout-link">Query</NavLink>
-                <NavLink to="/history" className="sidebar-flyout-link">History</NavLink>
               </div>
             </div>
             <div className="sidebar-item">
@@ -103,6 +104,19 @@ function App() {
             </div>
           </div>
           <div className="sidebar-bottom">
+            <div className="sidebar-item">
+              <button
+                className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'history') ? 'active' : ''}`}
+                onClick={() => navigate('/history')}
+                title="History"
+              >
+                <Logs size={20} />
+              </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">History</div>
+                <NavLink to="/history" className="sidebar-flyout-link">Query History</NavLink>
+              </div>
+            </div>
             <div className="sidebar-item">
               <button
                 className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'resources') ? 'active' : ''}`}
@@ -158,6 +172,18 @@ function App() {
           </Routes>
         </main>
       </div>
+      <StatusBar />
+    </div>
+    </StatusBarProvider>
+  )
+}
+
+function StatusBar() {
+  const { state } = useStatusBar()
+  return (
+    <div className="status-bar">
+      <div className="status-bar-left">{state.left}</div>
+      <div className="status-bar-right">{state.right}</div>
     </div>
   )
 }
