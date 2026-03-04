@@ -40,7 +40,7 @@ function App() {
       <div className="login-screen">
         <img src={kolkhisLogo} alt="Kolkhis" className="login-logo" />
         <h1>Kolkhis</h1>
-        <p className="login-subtitle">Data Warehouse</p>
+        <p className="login-subtitle">Euxine Data Platform</p>
         <button onClick={login}>Sign in with Google</button>
       </div>
     )

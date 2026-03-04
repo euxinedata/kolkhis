@@ -10,21 +10,21 @@
   align-items: center;
   gap: 0.75em;
   padding: 0.4em 0.75em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
   flex-shrink: 0;
 }
 
 .project-back-btn {
   background: none;
   border: none;
-  color: #8888bb;
+  color: #909090;
   font-size: 0.82em;
   cursor: pointer;
   padding: 0.2em 0.4em;
 }
 
 .project-back-btn:hover {
-  color: #646cff;
+  color: #d4850a;
   background: none;
   border: none;
 }
@@ -54,18 +54,18 @@
 .tree-resize-handle {
   width: 4px;
   cursor: col-resize;
-  background: #2a2a4a;
+  background: #1e1e1e;
   flex-shrink: 0;
 }
 
 .tree-resize-handle:hover {
-  background: #646cff;
+  background: #d4850a;
 }
 
 /* Sidebar tab switcher */
 .sidebar-tabs {
   display: flex;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
   flex-shrink: 0;
 }
 
@@ -74,7 +74,7 @@
   text-align: center;
   font-size: 0.75em;
   font-weight: 600;
-  color: #8888bb;
+  color: #909090;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0.5em 0.75em;
@@ -88,17 +88,17 @@
 
 .sidebar-tab.active {
   color: #ccc;
-  border-bottom: 2px solid #646cff;
+  border-bottom: 2px solid #d4850a;
 }
 
 .file-tree-title {
   font-size: 0.75em;
   font-weight: 600;
-  color: #8888bb;
+  color: #909090;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0.5em 0.75em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
 }
 
 .file-tree-list {
@@ -132,33 +132,33 @@
 
 .file-tree-list .rct-tree-root {
   font-size: 0.82em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
 
   /* Tree container */
   --rct-color-tree-bg: transparent;
   --rct-color-tree-focus-outline: transparent;
 
   /* Selected item (tree focused) */
-  --rct-color-focustree-item-selected-bg: #2a2a4a;
-  --rct-color-focustree-item-selected-text: #646cff;
+  --rct-color-focustree-item-selected-bg: #1e1e1e;
+  --rct-color-focustree-item-selected-text: #d4850a;
   --rct-color-focustree-item-focused-border: transparent;  /* removes the blue border */
 
   /* Selected item (tree not focused) */
-  --rct-color-nonfocustree-item-selected-bg: #22223a;
-  --rct-color-nonfocustree-item-selected-text: #8888bb;
+  --rct-color-nonfocustree-item-selected-bg: #181818;
+  --rct-color-nonfocustree-item-selected-text: #909090;
   --rct-color-nonfocustree-item-focused-border: transparent;
 
   /* Hover / active */
-  --rct-color-focustree-item-hover-bg: #1e1e3a;
+  --rct-color-focustree-item-hover-bg: #151515;
   --rct-color-focustree-item-hover-text: inherit;
-  --rct-color-focustree-item-active-bg: #1e1e3a;
+  --rct-color-focustree-item-active-bg: #151515;
   --rct-color-focustree-item-active-text: inherit;
 
   /* Arrow */
   --rct-color-arrow: #666;
 
   /* style-modern.css: left accent bar on selected items */
-  --rct-bar-color: #3a3a5a;
+  --rct-bar-color: #2a2a2a;
   --rct-bar-width: 2px;
 
   /* style-modern.css: focus-visible outline on button */
@@ -189,7 +189,7 @@
 
 /* Tame the left accent bar on selected items (style-modern.css ::before) */
 .file-tree-list .rct-tree-item-title-container-selected .rct-tree-item-button::before {
-  background-color: #3a3a5a;
+  background-color: #2a2a2a;
   width: 2px;
 }
 
@@ -219,8 +219,8 @@
 /* Tab bar */
 .editor-tabs {
   display: flex;
-  background: #181830;
-  border-bottom: 1px solid #2a2a4a;
+  background: #080808;
+  border-bottom: 1px solid #1e1e1e;
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -236,10 +236,10 @@
   gap: 0.5em;
   padding: 0.35em 0.5em 0.35em 0.75em;
   font-size: 1em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   color: #888;
   cursor: pointer;
-  border-right: 1px solid #2a2a4a;
+  border-right: 1px solid #1e1e1e;
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -251,8 +251,8 @@
 
 .editor-tab.active {
   color: #ccc;
-  background: #1a1a2e;
-  border-bottom: 2px solid #646cff;
+  background: #0a0a0a;
+  border-bottom: 2px solid #d4850a;
 }
 
 .editor-tab-name {
@@ -277,7 +277,7 @@
 
 .editor-tab-close:hover {
   color: #ccc;
-  background: #3a3a5a;
+  background: #2a2a2a;
 }
 
 /* Dirty indicator: dot replaces close X; hover reveals X again */
@@ -316,12 +316,12 @@
 .terminal-resize-handle {
   height: 4px;
   cursor: row-resize;
-  background: #2a2a4a;
+  background: #1e1e1e;
   flex-shrink: 0;
 }
 
 .terminal-resize-handle:hover {
-  background: #646cff;
+  background: #d4850a;
 }
 
 .terminal-panel {
@@ -333,9 +333,9 @@
 
 .terminal-tabs {
   display: flex;
-  background: #181830;
-  border-top: 1px solid #2a2a4a;
-  border-bottom: 1px solid #2a2a4a;
+  background: #080808;
+  border-top: 1px solid #1e1e1e;
+  border-bottom: 1px solid #1e1e1e;
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -351,10 +351,10 @@
   gap: 0.5em;
   padding: 0.3em 0.5em 0.3em 0.75em;
   font-size: 1em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   color: #888;
   cursor: pointer;
-  border-right: 1px solid #2a2a4a;
+  border-right: 1px solid #1e1e1e;
   white-space: nowrap;
   user-select: none;
 }
@@ -365,8 +365,8 @@
 
 .terminal-tab.active {
   color: #ccc;
-  background: #0e0e1a;
-  border-bottom: 2px solid #646cff;
+  background: #060606;
+  border-bottom: 2px solid #d4850a;
 }
 
 .terminal-tab-name {
@@ -376,12 +376,12 @@
 }
 
 .terminal-tab-rename {
-  background: #0e0e1a;
-  border: 1px solid #646cff;
+  background: #060606;
+  border: 1px solid #d4850a;
   border-radius: 2px;
   color: #ccc;
   font-size: 1em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   padding: 0 0.25em;
   width: 80px;
   outline: none;
@@ -403,7 +403,7 @@
 
 .terminal-tab-close:hover {
   color: #ccc !important;
-  background: #3a3a5a;
+  background: #2a2a2a;
 }
 
 .terminal-tab-add {
@@ -412,7 +412,7 @@
   outline: none;
   color: #666;
   font-size: 0.85em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   padding: 0.3em 0.6em;
   cursor: pointer;
 }
@@ -425,7 +425,7 @@
 
 .terminal-content {
   flex: 1;
-  background: #0e0e1a;
+  background: #060606;
   overflow: hidden;
 }
 
@@ -442,14 +442,14 @@
 .context-menu {
   position: fixed;
   z-index: 1000;
-  background: #1e1e3a;
-  border: 1px solid #3a3a5a;
+  background: #151515;
+  border: 1px solid #2a2a2a;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   padding: 0.25em 0;
   min-width: 140px;
   font-size: 0.82em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
 }
 
 .context-menu-item {
@@ -459,13 +459,13 @@
 }
 
 .context-menu-item:hover {
-  background: #2a2a4a;
+  background: #1e1e1e;
   color: #fff;
 }
 
 /* Highlight on right-clicked node */
 .context-target {
-  background: #2a2a4a;
+  background: #1e1e1e;
 }
 
 /* VCS status colors (PyCharm dark convention) */
@@ -493,11 +493,11 @@
   justify-content: space-between;
   height: 22px;
   padding: 0 0.5em;
-  background: #181830;
-  border-top: 1px solid #2a2a4a;
+  background: #080808;
+  border-top: 1px solid #1e1e1e;
   flex-shrink: 0;
   font-size: 0.72em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   color: #888;
   user-select: none;
 }
@@ -524,11 +524,11 @@
 
 .status-bar-btn {
   background: none;
-  border: 1px solid #3a3a5a;
+  border: 1px solid #2a2a2a;
   border-radius: 3px;
   color: #888;
   font-size: 1em;
-  font-family: monospace;
+  font-family: 'Geist Mono', monospace;
   padding: 0 0.5em;
   cursor: pointer;
   height: 18px;
@@ -537,65 +537,11 @@
 
 .status-bar-btn:hover {
   color: #ccc;
-  border-color: #646cff;
+  border-color: #d4850a;
   background: none;
 }
 
 .status-bar-btn.active {
-  color: #646cff;
+  color: #d4850a;
 }
 
-/* Light mode */
-@media (prefers-color-scheme: light) {
-  .project-editor-header {
-    border-bottom-color: #e0e0ea;
-  }
-  .project-editor-name {
-    color: #333;
-  }
-  .file-tree-panel {
-    border-right-color: #e0e0ea;
-  }
-  .sidebar-tabs {
-    border-bottom-color: #e0e0ea;
-  }
-  .sidebar-tab {
-    color: #888;
-  }
-  .sidebar-tab:hover {
-    color: #333;
-  }
-  .sidebar-tab.active {
-    color: #333;
-  }
-  .file-tree-title {
-    border-bottom-color: #e0e0ea;
-  }
-  .context-menu {
-    background: #fff;
-    border-color: #d0d0dd;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  }
-  .context-menu-item {
-    color: #333;
-  }
-  .context-menu-item:hover {
-    background: #eeeef5;
-    color: #111;
-  }
-  .context-target {
-    background: #eeeef5;
-  }
-  .vcs-new {
-    color: #4a7a3a !important;
-  }
-  .vcs-modified {
-    color: #4a78a0 !important;
-  }
-  .vcs-deleted {
-    color: #8b4a3a !important;
-  }
-  .vcs-dir-changed {
-    color: #6b6950 !important;
-  }
-}

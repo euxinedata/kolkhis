@@ -1,11 +1,11 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'DM Sans', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
+  color-scheme: dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #1a1a2e;
+  background-color: #0a0a0a;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -19,11 +19,11 @@
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: #d4850a;
   text-decoration: inherit;
 }
 a:hover {
-  color: #535bf2;
+  color: #b8720a;
 }
 
 body {
@@ -45,14 +45,14 @@ button {
   font-size: 0.9em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #2a2a4a;
+  background-color: #1e1e1e;
   color: inherit;
   cursor: pointer;
   transition: border-color 0.25s, background-color 0.25s;
 }
 button:hover {
-  border-color: #646cff;
-  background-color: #3a3a5a;
+  border-color: #d4850a;
+  background-color: #2a2a2a;
 }
 button:focus,
 button:focus-visible {
@@ -67,13 +67,13 @@ input, textarea, select {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  background-color: #16162a;
-  border: 1px solid #3a3a5a;
+  background-color: #0e0e0e;
+  border: 1px solid #2a2a2a;
   border-radius: 6px;
   padding: 0.5em;
 }
 input:focus, textarea:focus, select:focus {
-  outline: 2px solid #646cff;
+  outline: 2px solid #d4850a;
   outline-offset: 1px;
 }
 
@@ -85,41 +85,16 @@ table {
 th, td {
   text-align: left;
   padding: 0.5em 0.75em;
-  border-bottom: 1px solid #2a2a4a;
+  border-bottom: 1px solid #1e1e1e;
 }
 th {
   font-weight: 600;
-  color: #8888bb;
+  color: #909090;
   font-size: 0.85em;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 tr:hover td {
-  background-color: #1e1e3a;
+  background-color: #151515;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #f5f5fa;
-  }
-  button {
-    background-color: #e8e8f0;
-  }
-  button:hover {
-    background-color: #d8d8e8;
-  }
-  input, textarea, select {
-    background-color: #ffffff;
-    border-color: #d0d0e0;
-  }
-  th {
-    color: #666688;
-  }
-  tr:hover td {
-    background-color: #eeeef5;
-  }
-  th, td {
-    border-bottom-color: #e0e0ea;
-  }
-}
