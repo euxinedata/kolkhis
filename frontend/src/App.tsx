@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react'
 import { NavLink, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './auth.tsx'
+import { apiFetch } from './api'
 import { Billing } from './pages/Billing.tsx'
 import { QueryEditor } from './pages/QueryEditor.tsx'
 import { QueryHistory } from './pages/QueryHistory.tsx'
@@ -178,12 +180,67 @@ function App() {
   )
 }
 
+const WORKER_TYPES: Record<string, { size: string; bird: string; specs: string }> = {
+  cpx42: { size: 'XS', bird: 'Sparrow', specs: '8 vCPU, 16 GB' },
+  cpx62: { size: 'S',  bird: 'Dove',    specs: '16 vCPU, 32 GB' },
+  ccx43: { size: 'M',  bird: 'Falcon',  specs: '16 vCPU, 64 GB' },
+  ccx53: { size: 'L',  bird: 'Stork',   specs: '32 vCPU, 128 GB' },
+  ccx63: { size: 'XL', bird: 'Swan',    specs: '48 vCPU, 192 GB' },
+}
+
+interface WorkerInfo {
+  id: number
+  status: string
+  server_type: string
+}
+
+function WorkerIndicator() {
+  const [worker, setWorker] = useState<WorkerInfo | null>(null)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => {
+      apiFetch<WorkerInfo[]>('/api/workers')
+        .then(ws => { if (!cancelled) setWorker(ws.length > 0 ? ws[0] : null) })
+        .catch(() => { if (!cancelled) setWorker(null) })
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  if (!worker) return null
+
+  const info = WORKER_TYPES[worker.server_type]
+  const birdKey = (info?.bird ?? 'falcon').toLowerCase()
+  const tooltip = info
+    ? `${info.bird} \u2014 ${info.size} (${info.specs}) \u2014 ${worker.status}`
+    : `${worker.server_type} \u2014 ${worker.status}`
+
+  return (
+    <div className="worker-indicator" onClick={() => navigate('/resources')}>
+      <div
+        className={`worker-icon worker-${worker.status}`}
+        style={{
+          maskImage: `url(/worker-icons/${birdKey}.svg)`,
+          WebkitMaskImage: `url(/worker-icons/${birdKey}.svg)`,
+        }}
+      />
+      <div className="worker-tooltip">{tooltip}</div>
+    </div>
+  )
+}
+
 function StatusBar() {
   const { state } = useStatusBar()
   return (
     <div className="status-bar">
       <div className="status-bar-left">{state.left}</div>
-      <div className="status-bar-right">{state.right}</div>
+      <div className="status-bar-right">
+        {state.right}
+        <WorkerIndicator />
+      </div>
     </div>
   )
 }
