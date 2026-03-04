@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-server git yamllint sudo && rm -rf /var/lib/apt/lists/*
+    openssh-server git yamllint sudo nano && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir dbt-core sqlfluff \
     git+https://github.com/euxinedata/dbt-kolkhis.git@v0.2.0
 

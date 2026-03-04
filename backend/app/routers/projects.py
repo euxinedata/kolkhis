@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import WORKER_AUTH_TOKEN
+from app import config
 from app.database import get_db
 from app.gitea import create_repo, create_or_update_file, delete_repo
 from app.models import Project
@@ -35,19 +36,26 @@ dispatch:
   - macro_namespace: dbt
     search_order: ['kolkhis', '{name}', 'dbt']
 """,
-    "profiles.yml": """\
-'{name}':
+    "README.md": """\
+# {name}
+
+A dbt project powered by Kolkhis.
+""",
+}
+
+DBT_PROFILE_TEMPLATE = """\
+
+{name}:
   target: dev
   outputs:
     dev:
       type: kolkhis
-      backend_url: http://host.docker.internal:8000
-      worker_url: http://host.docker.internal:8080
-      auth_token: '{worker_auth_token}'
+      backend_url: {backend_url}
+      worker_url: {worker_url}
+      auth_token: '{auth_token}'
       database: kolkhis
       schema: main
-""",
-}
+"""
 
 DBT_DIRS = ["macros", "models", "seeds", "tests"]
 
@@ -140,15 +148,27 @@ async def create_project(
         raise HTTPException(status_code=502, detail=f"Failed to create repo: {exc}")
 
     # Commit dbt scaffold via Gitea API (so initial clone is clean)
+    dbt_name = body.name.replace("-", "_")
     for path, content in DBT_SCAFFOLD.items():
-        dbt_name = body.name.replace("-", "_")
-        rendered = content.replace("{name}", dbt_name).replace("{worker_auth_token}", WORKER_AUTH_TOKEN)
+        rendered = content.replace("{name}", dbt_name)
         await create_or_update_file(repo_name, path, rendered, f"Add {path}")
 
     # Clone locally and create dbt directories
     await clone_repo(shell_username, repo_name, **_user_git(user))
     for d in DBT_DIRS:
         create_directory(shell_username, repo_name, d)
+
+    # Append profile entry to ~/.dbt/profiles.yml on host filesystem
+    profiles_path = Path(config.HOMES_PATH) / shell_username / ".dbt" / "profiles.yml"
+    profiles_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_entry = DBT_PROFILE_TEMPLATE.format(
+        name=dbt_name,
+        backend_url=config.SHELL_BACKEND_URL,
+        worker_url=config.SHELL_WORKER_URL,
+        auth_token=config.WORKER_AUTH_TOKEN,
+    )
+    with open(profiles_path, "a") as f:
+        f.write(profile_entry)
 
     # Save to DB
     project = Project(
