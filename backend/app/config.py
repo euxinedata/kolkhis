@@ -75,6 +75,9 @@ GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
 # Shell pod SSH configuration
+SHELL_BACKEND_URL = os.environ.get("SHELL_BACKEND_URL", "http://host.docker.internal:8000")
+SHELL_WORKER_URL = os.environ.get("SHELL_WORKER_URL", "http://host.docker.internal:8080")
+
 SHELL_SSH_HOST = os.environ.get("SHELL_SSH_HOST", "localhost")
 SHELL_SSH_PORT = int(os.environ.get("SHELL_SSH_PORT", "2222"))
 SHELL_SSH_USER = os.environ.get("SHELL_SSH_USER", "shelluser")

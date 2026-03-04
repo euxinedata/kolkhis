@@ -2,12 +2,13 @@
 
 import logging
 import re
+from pathlib import Path
 
 import asyncssh
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_USER, SHELL_SSH_KEY_PATH
+from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_USER, SHELL_SSH_KEY_PATH, HOMES_PATH
 from app.models import User
 
 log = logging.getLogger(__name__)
@@ -55,6 +56,11 @@ async def provision_shell_user(shell_username: str) -> None:
         f"sudo cp /home/shelluser/.ssh/authorized_keys "
         f"/home/{shell_username}/.ssh/authorized_keys"
     )
+    # Seed ~/.dbt/profiles.yml with a comment header on host filesystem
+    profiles_path = Path(HOMES_PATH) / shell_username / ".dbt" / "profiles.yml"
+    profiles_path.parent.mkdir(parents=True, exist_ok=True)
+    profiles_path.write_text("# dbt profiles — managed by Kolkhis\n")
+
     # Fix ownership
     await _run_ssh_command(
         f"sudo chown -R {shell_username}:{shell_username} /home/{shell_username}"
