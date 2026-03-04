@@ -25,7 +25,6 @@ def setup_connection(
     s3_access_key: str,
     s3_secret_key: str,
     s3_region: str,
-    use_databases: bool = False,
 ) -> None:
     """Load extensions, configure S3, and register catalog objects on a DuckDB connection."""
     conn.install_extension("iceberg")
@@ -47,32 +46,26 @@ def setup_connection(
         )
     """)
 
+    created_dbs: set[str] = set()
     created_schemas: set[str] = set()
     sorted_objects = sorted(
         catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1
     )
 
     for obj in sorted_objects:
-        duckdb_schema = obj["duckdb_schema"]
+        parts = obj["duckdb_schema"].split(".", 1)
+        db_name, schema_name = parts[0], parts[1] if len(parts) > 1 else "main"
 
-        if use_databases:
-            # Split "database.schema" into separate DuckDB database + schema
-            parts = duckdb_schema.split(".", 1)
-            db_name, schema_name = parts[0], parts[1] if len(parts) > 1 else "main"
-            if db_name not in created_schemas:
-                conn.execute(f"ATTACH ':memory:' AS \"{db_name}\"")
-                created_schemas.add(db_name)
-            full_schema = f'"{db_name}"."{schema_name}"'
-            if full_schema not in created_schemas:
-                conn.execute(f"CREATE SCHEMA IF NOT EXISTS {full_schema}")
-                created_schemas.add(full_schema)
-            qualified_name = f'{full_schema}."{obj["name"]}"'
-        else:
-            # Flat schema: "database.schema" as a single schema name
-            if duckdb_schema not in created_schemas:
-                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{duckdb_schema}"')
-                created_schemas.add(duckdb_schema)
-            qualified_name = f'"{duckdb_schema}"."{obj["name"]}"'
+        if db_name not in created_dbs:
+            conn.execute(f"ATTACH ':memory:' AS \"{db_name}\"")
+            created_dbs.add(db_name)
+
+        full_schema = f'"{db_name}"."{schema_name}"'
+        if full_schema not in created_schemas:
+            conn.execute(f"CREATE SCHEMA IF NOT EXISTS {full_schema}")
+            created_schemas.add(full_schema)
+
+        qualified_name = f'{full_schema}."{obj["name"]}"'
 
         if obj["object_type"] == "table" and obj.get("metadata_location"):
             conn.execute(
