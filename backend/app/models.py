@@ -12,14 +12,6 @@ class Base(DeclarativeBase):
     pass
 
 
-class Item(Base):
-    __tablename__ = "items"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -76,37 +68,6 @@ class Country(Base):
     alpha_3: Mapped[str] = mapped_column(String(3), unique=True)
 
 
-class Database(Base):
-    __tablename__ = "databases"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class Schema(Base):
-    __tablename__ = "schemas"
-    __table_args__ = (UniqueConstraint("database_id", "name"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    database_id: Mapped[int] = mapped_column(ForeignKey("databases.id"))
-    name: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class CatalogObject(Base):
-    __tablename__ = "catalog_objects"
-    __table_args__ = (UniqueConstraint("schema_id", "name"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    schema_id: Mapped[int] = mapped_column(ForeignKey("schemas.id"))
-    name: Mapped[str] = mapped_column(String(255))
-    object_type: Mapped[str] = mapped_column(String(20))  # "table" or "view"
-    iceberg_identifier: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    view_sql: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
@@ -150,15 +111,6 @@ class ServerTypeRate(Base):
     hourly_rate_eur: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
-
-
-class UserApiToken(Base):
-    __tablename__ = "user_api_tokens"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
-    token_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class BillingPeriod(Base):
