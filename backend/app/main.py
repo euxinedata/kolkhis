@@ -27,6 +27,7 @@ from app.routers.terminal import router as terminal_router
 from app.routers.workers import router as workers_router
 from app.routers.orgs import router as orgs_router
 from app.routers.workspace import router as workspace_router
+from app.routers.dbt import router as dbt_router
 
 
 @asynccontextmanager
@@ -86,6 +87,7 @@ app.include_router(terminal_router)
 app.include_router(workers_router)
 app.include_router(orgs_router)
 app.include_router(workspace_router)
+app.include_router(dbt_router)
 
 
 _UNAUTH = JSONResponse({"detail": "Not authenticated"}, status_code=401)

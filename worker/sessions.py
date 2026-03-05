@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import duckdb
 import pyarrow.ipc as ipc
 
-from executor import setup_connection
+from executor import setup_connection, setup_iceberg_catalog
 
 
 @dataclass
@@ -28,28 +28,16 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
-    def create(
-        self,
-        catalog_objects: list[dict],
-        s3_endpoint: str,
-        s3_access_key: str,
-        s3_secret_key: str,
-        s3_region: str,
-    ) -> str:
-        session_id = uuid.uuid4().hex
+    def _new_conn(self, session_id: str) -> tuple[duckdb.DuckDBPyConnection, str]:
         temp_dir = os.path.join(tempfile.gettempdir(), f".session_{session_id}")
         os.makedirs(temp_dir, exist_ok=True)
-
         conn = duckdb.connect()
         conn.execute(f"SET temp_directory='{temp_dir}'")
         if os.path.isdir("/opt/kolkhis-worker"):
             conn.execute("SET home_directory='/opt/kolkhis-worker'")
+        return conn, temp_dir
 
-        setup_connection(
-            conn, catalog_objects,
-            s3_endpoint, s3_access_key, s3_secret_key, s3_region,
-        )
-
+    def _register_session(self, session_id: str, conn: duckdb.DuckDBPyConnection, temp_dir: str) -> str:
         now = time.time()
         session = Session(
             id=session_id,
@@ -59,11 +47,42 @@ class SessionManager:
             created_at=now,
             last_used_at=now,
         )
-
         with self._lock:
             self._sessions[session_id] = session
-
         return session_id
+
+    def create(
+        self,
+        catalog_objects: list[dict],
+        s3_endpoint: str,
+        s3_access_key: str,
+        s3_secret_key: str,
+        s3_region: str,
+    ) -> str:
+        session_id = uuid.uuid4().hex
+        conn, temp_dir = self._new_conn(session_id)
+        setup_connection(
+            conn, catalog_objects,
+            s3_endpoint, s3_access_key, s3_secret_key, s3_region,
+        )
+        return self._register_session(session_id, conn, temp_dir)
+
+    def create_iceberg(
+        self,
+        lakekeeper_url: str,
+        warehouse: str,
+        s3_endpoint: str,
+        s3_access_key: str,
+        s3_secret_key: str,
+        s3_region: str,
+    ) -> str:
+        session_id = uuid.uuid4().hex
+        conn, temp_dir = self._new_conn(session_id)
+        setup_iceberg_catalog(
+            conn, lakekeeper_url, warehouse,
+            s3_endpoint, s3_access_key, s3_secret_key, s3_region,
+        )
+        return self._register_session(session_id, conn, temp_dir)
 
     def get(self, session_id: str) -> Session | None:
         with self._lock:

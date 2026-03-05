@@ -120,6 +120,8 @@ def read_file(org_id: str, shell_username: str, repo_name: str, path: str) -> st
 
 def _chown_as_user(target: Path, org_id: str, shell_username: str) -> None:
     """Set ownership of target to the shell user."""
+    if os.getuid() != 0:
+        return
     uid = get_uid_for_user(org_id, shell_username)
     if uid is not None:
         os.chown(target, uid, uid)

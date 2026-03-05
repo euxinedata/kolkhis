@@ -58,14 +58,21 @@ model-paths: ["models"]
 macro-paths: ["macros"]
 seed-paths: ["seeds"]
 test-paths: ["tests"]
+
+dispatch:
+  - macro_namespace: dbt
+    search_order: ['kolkhis', 'dbt']
 """,
     "profiles.yml": """\
 '{name}':
   target: dev
   outputs:
     dev:
-      type: duckdb
-      path: /dev/null
+      type: kolkhis
+      backend_url: "{{ env_var('KOLKHIS_BACKEND_URL') }}"
+      auth_token: "{{ env_var('KOLKHIS_AUTH_TOKEN') }}"
+      database: warehouse
+      schema: default
 """,
     ".gitignore": """\
 # Python

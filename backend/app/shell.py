@@ -11,7 +11,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import HOMES_PATH, SHELL_SSH_PUBKEY_PATH
+import jwt
+
+from app.config import HOMES_PATH, JWT_SECRET, SHELL_BACKEND_URL, SHELL_SSH_PUBKEY_PATH
 from app.models import OrgMembership
 
 log = logging.getLogger(__name__)
@@ -74,7 +76,16 @@ def chown_recursive(path: Path, uid: int, gid: int) -> None:
             os.chown(os.path.join(dirpath, name), uid, gid)
 
 
-def provision_shell_user(org_id: str, shell_username: str) -> None:
+def _make_shell_token(user_id: int, email: str, org_id: str) -> str:
+    """Create a long-lived JWT for dbt CLI usage in the shell."""
+    return jwt.encode(
+        {"sub": str(user_id), "email": email, "name": email.split("@")[0], "org_id": org_id},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+
+
+def provision_shell_user(org_id: str, shell_username: str, user_id: int = 0, email: str = "") -> None:
     """Create a Linux user by writing directly to auth files on the PV."""
     auth_dir = _auth_dir(org_id)
     lock_path = auth_dir / ".lock"
@@ -125,6 +136,15 @@ def provision_shell_user(org_id: str, shell_username: str) -> None:
     # Minimal skel files
     bashrc = home / ".bashrc"
     if not bashrc.exists():
+        # Generate dbt auth token if user info is available
+        token_lines = ""
+        if user_id and email:
+            token = _make_shell_token(user_id, email, org_id)
+            token_lines = (
+                "\n# Kolkhis dbt adapter\n"
+                f"export KOLKHIS_AUTH_TOKEN='{token}'\n"
+                f"export KOLKHIS_BACKEND_URL='{SHELL_BACKEND_URL}'\n"
+            )
         bashrc.write_text(
             "# ~/.bashrc\n"
             "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n"
@@ -135,6 +155,7 @@ def provision_shell_user(org_id: str, shell_username: str) -> None:
             "# Colors for ls and grep\n"
             "alias ls='ls --color=auto'\n"
             "alias grep='grep --color=auto'\n"
+            + token_lines
         )
 
     profile = home / ".profile"
@@ -175,7 +196,7 @@ async def ensure_shell_user(user_id: int, org_id: str, email: str, db: AsyncSess
     if existing.scalar() is not None:
         username = f"{username}-{user_id}"[:32]
 
-    await asyncio.to_thread(provision_shell_user, org_id, username)
+    await asyncio.to_thread(provision_shell_user, org_id, username, user_id, email)
 
     membership.shell_username = username
     await db.commit()

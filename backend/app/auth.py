@@ -105,6 +105,11 @@ async def callback_google(request: Request):
 def verify_token(request: Request) -> dict | None:
     tok = request.cookies.get(_COOKIE_NAME)
     if not tok:
+        # Fall back to Authorization: Bearer header (for API clients like dbt)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            tok = auth_header[7:]
+    if not tok:
         return None
     try:
         return jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
