@@ -111,7 +111,7 @@ def _create_namespace_aliases(
                 try:
                     conn.execute(
                         f'CREATE VIEW "{db_name}"."{schema_name}"."{tbl_name}" AS '
-                        f'SELECT * FROM {warehouse}."{iceberg_schema}"."{tbl_name}"'
+                        f'SELECT * FROM "{warehouse}"."{iceberg_schema}"."{tbl_name}"'
                     )
                 except duckdb.Error as exc:
                     logger.warning("Failed to create alias view %s.%s.%s: %s", db_name, schema_name, tbl_name, exc)
@@ -149,8 +149,9 @@ def setup_iceberg_catalog(
     """)
 
     catalog_endpoint = f"{lakekeeper_url}/catalog"
+    # Quote the alias since warehouse is a UUID with dashes
     conn.execute(f"""
-        ATTACH '{warehouse}' AS {warehouse} (
+        ATTACH '{warehouse}' AS "{warehouse}" (
             TYPE ICEBERG,
             ENDPOINT '{catalog_endpoint}',
             AUTHORIZATION_TYPE 'none',
