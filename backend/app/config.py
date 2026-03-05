@@ -71,7 +71,10 @@ GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
 GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
-# Shell pod SSH configuration
+# Shell pod configuration
+SHELL_MODE = os.environ.get("SHELL_MODE", "local")  # "local" or "k8s"
+SHELL_NAMESPACE = os.environ.get("SHELL_NAMESPACE", "kolkhis")
+SHELL_IMAGE = os.environ.get("SHELL_IMAGE", "ghcr.io/euxinedata/kolkhis-shell:latest")
 SHELL_BACKEND_URL = os.environ.get("SHELL_BACKEND_URL", "http://host.docker.internal:8000")
 
 SHELL_SSH_HOST = os.environ.get("SHELL_SSH_HOST", "localhost")

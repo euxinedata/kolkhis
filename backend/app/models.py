@@ -17,6 +17,7 @@ class Organization(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), unique=True)
+    shell_service_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -127,3 +128,16 @@ class BillingPeriod(Base):
     stripe_reported: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class ShellProvision(Base):
+    __tablename__ = "shell_provisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), index=True)
+    action: Mapped[str] = mapped_column(String(20))  # create, delete
+    resource_type: Mapped[str] = mapped_column(String(20))  # pv, pvc, deployment, service
+    resource_name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20))  # pending, success, failed
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

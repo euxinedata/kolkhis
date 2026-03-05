@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
+from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, SHELL_MODE
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import Organization, OrgMembership, User
@@ -97,6 +97,17 @@ dbt_packages/
 }
 
 
+async def _provision_shell_k8s(org_id: str) -> None:
+    """Background task: provision K8s shell pod for an org."""
+    try:
+        from app.shell_k8s import provision_shell_pod
+        async with async_session() as db:
+            await provision_shell_pod(org_id, db)
+        logger.info("K8s shell pod provisioned for org %s", org_id)
+    except Exception:
+        logger.exception("K8s shell provisioning failed for org %s", org_id)
+
+
 async def _provision_workspace(
     user_id: int, org_id: str, email: str, user_name: str,
 ) -> None:
@@ -158,6 +169,10 @@ async def create_org(
         raise HTTPException(status_code=502, detail="Failed to provision organization")
 
     await db.commit()
+
+    # In K8s mode, provision the org's shell pod before workspace setup
+    if SHELL_MODE == "k8s":
+        asyncio.create_task(_provision_shell_k8s(org.id))
 
     # Provision shell user + clone repo in background
     asyncio.create_task(_provision_workspace(
