@@ -1,0 +1,24 @@
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: DAGSTER_PG_USERNAME
+      password:
+        env: DAGSTER_PG_PASSWORD
+      hostname:
+        env: DAGSTER_PG_HOST
+      db_name:
+        env: DAGSTER_PG_DB
+      port: 5432
+
+run_launcher:
+  module: dagster_k8s
+  class: K8sRunLauncher
+  config:
+    service_account_name: dagster
+    job_namespace: kolkhis
+    load_incluster_config: true
+    job_image:
+      env: DAGSTER_IMAGE
+    env_secrets:
+      - dagster-credentials
