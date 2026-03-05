@@ -64,6 +64,8 @@ S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
 
 # Lakekeeper Iceberg REST catalog
 LAKEKEEPER_URL = os.environ.get("LAKEKEEPER_URL", "http://localhost:8181")
+# Lakekeeper URL as seen from worker VMs (for remote mode); defaults to LAKEKEEPER_URL
+LAKEKEEPER_WORKER_URL = os.environ.get("LAKEKEEPER_WORKER_URL", LAKEKEEPER_URL)
 
 # Gitea configuration
 GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")
