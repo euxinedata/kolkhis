@@ -11,7 +11,7 @@ def get_org_catalog(org_id: str) -> RestCatalog:
     return RestCatalog(
         f"org-{org_id}",
         uri=f"{LAKEKEEPER_URL}/catalog",
-        warehouse="warehouse",
+        warehouse=org_id,
         **{
             "s3.endpoint": S3_ENDPOINT,
             "s3.access-key-id": S3_ACCESS_KEY,
