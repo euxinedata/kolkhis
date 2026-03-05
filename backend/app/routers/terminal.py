@@ -6,8 +6,9 @@ import asyncssh
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.auth import verify_token
-from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_KEY_PATH
+from app.config import SHELL_MODE, SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_KEY_PATH
 from app.database import async_session
+from app.models import Organization
 from app.shell import ensure_shell_user
 from app.workspace import is_clone_ready
 
@@ -47,9 +48,17 @@ async def terminal_ws(websocket: WebSocket):
         await websocket.close(code=4403, reason="No organization selected")
         return
 
-    # Look up shell username
+    # Look up shell username and resolve SSH host
+    ssh_host = SHELL_SSH_HOST
+    ssh_port = SHELL_SSH_PORT
     async with async_session() as session:
         shell_username, _ = await ensure_shell_user(user_id, org_id, user_email, session)
+        if SHELL_MODE == "k8s":
+            from app.shell_k8s import shell_host_for_org
+            org = await session.get(Organization, org_id)
+            if org:
+                ssh_host = shell_host_for_org(org)
+                ssh_port = 22
 
     if not is_clone_ready(org_id, shell_username, WAREHOUSE_REPO):
         await websocket.close(code=4503, reason="Workspace is being prepared")
@@ -61,8 +70,8 @@ async def terminal_ws(websocket: WebSocket):
     try:
         # Connect to shell pod as the user's own account
         conn = await asyncssh.connect(
-            SHELL_SSH_HOST,
-            port=SHELL_SSH_PORT,
+            ssh_host,
+            port=ssh_port,
             username=shell_username,
             client_keys=[SHELL_SSH_KEY_PATH],
             known_hosts=None,
