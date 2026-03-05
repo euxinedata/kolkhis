@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api'
-import kolkhisLogo from '../assets/kolkhis.svg'
+import kolkhisLogo from '../assets/kolkhis-large.svg'
 import './Onboarding.css'
 
 interface Org {

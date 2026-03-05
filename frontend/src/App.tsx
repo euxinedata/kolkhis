@@ -12,6 +12,7 @@ import { Placeholder } from './pages/Placeholder.tsx'
 import { Onboarding } from './pages/Onboarding.tsx'
 import { Members } from './pages/Members.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
+import kolkhisLogoLarge from './assets/kolkhis-large.svg'
 import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Logs, Users, Settings as SettingsIcon } from 'lucide-react'
 import { StatusBarProvider, useStatusBar } from './StatusBarContext.tsx'
 import './App.css'
@@ -42,7 +43,7 @@ function App() {
   if (!user) {
     return (
       <div className="login-screen">
-        <img src={kolkhisLogo} alt="Kolkhis" className="login-logo" />
+        <img src={kolkhisLogoLarge} alt="Kolkhis" className="login-logo" />
         <h1>Kolkhis</h1>
         <p className="login-subtitle">Euxine Data Platform</p>
         <button onClick={login}>Sign in with Google</button>
@@ -59,7 +60,7 @@ function App() {
     <div className="app">
       <nav className="app-nav">
         <span className="app-title">
-          <img src={kolkhisLogo} alt="" className="nav-logo" />
+          <img src={kolkhisLogo} alt="" className="nav-logo" onClick={() => navigate('/')} />
           Kolkhis
         </span>
         <div className="nav-user">
