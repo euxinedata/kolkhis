@@ -45,6 +45,16 @@ async def _create_org_bucket(org_id: str) -> None:
     )
     await asyncio.to_thread(fs.mkdir, org_id)
 
+    # Wait for bucket to be available
+    def _wait_for_bucket():
+        import time
+        for _ in range(10):
+            if fs.exists(org_id):
+                return
+            time.sleep(1)
+        raise Exception(f"S3 bucket {org_id} not available after creation")
+    await asyncio.to_thread(_wait_for_bucket)
+
     # Register warehouse in Lakekeeper
     async with httpx.AsyncClient() as client:
         resp = await client.post(
