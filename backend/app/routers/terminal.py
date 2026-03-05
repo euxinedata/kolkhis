@@ -51,7 +51,7 @@ async def terminal_ws(websocket: WebSocket):
     # Ensure shell user and clone warehouse repo
     async with async_session() as session:
         shell_username, gitea_org = await ensure_shell_user(user_id, org_id, user_email, session)
-        await ensure_clone(shell_username, WAREHOUSE_REPO, user_name, user_email, owner=gitea_org)
+        await ensure_clone(org_id, shell_username, WAREHOUSE_REPO, user_name, user_email, owner=gitea_org)
 
     await websocket.accept()
 

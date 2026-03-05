@@ -82,7 +82,7 @@ services:
     ports:
       - "2222:22"
     volumes:
-      - ./backend/data/homes:/home
+      - ./backend/data/homes/${SHELL_ORG_UUID}:/home
 
   dagster-init:
     image: postgres:17

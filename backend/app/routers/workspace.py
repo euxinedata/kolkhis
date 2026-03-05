@@ -39,8 +39,8 @@ def _user_id(user: dict) -> int:
     return int(user["sub"])
 
 
-async def _get_workspace(user: dict, db: AsyncSession) -> tuple[str, str]:
-    """Return (shell_username, gitea_org) for the current user's active org."""
+async def _get_workspace(user: dict, db: AsyncSession) -> tuple[str, str, str]:
+    """Return (org_id, shell_username, gitea_org) for the current user's active org."""
     org_id = user.get("org_id")
     if not org_id:
         raise HTTPException(status_code=403, detail="No organization selected")
@@ -48,11 +48,11 @@ async def _get_workspace(user: dict, db: AsyncSession) -> tuple[str, str]:
         _user_id(user), org_id, user.get("email", ""), db,
     )
     await ensure_clone(
-        shell_username, WAREHOUSE_REPO,
+        org_id, shell_username, WAREHOUSE_REPO,
         user.get("name", ""), user.get("email", ""),
         owner=gitea_org,
     )
-    return shell_username, gitea_org
+    return org_id, shell_username, gitea_org
 
 
 @router.get("/files")
@@ -61,9 +61,9 @@ async def list_workspace_files(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        entries = ws_list_files(shell_username, WAREHOUSE_REPO, path)
+        entries = ws_list_files(org_id, shell_username, WAREHOUSE_REPO, path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
     return [
@@ -79,9 +79,9 @@ async def get_workspace_file(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        content = read_file(shell_username, WAREHOUSE_REPO, path)
+        content = read_file(org_id, shell_username, WAREHOUSE_REPO, path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     return {"path": path, "content": content}
@@ -93,9 +93,9 @@ async def create_workspace_file(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        write_file(shell_username, WAREHOUSE_REPO, body.path, body.content)
+        write_file(org_id, shell_username, WAREHOUSE_REPO, body.path, body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"path": body.path}
@@ -107,9 +107,9 @@ async def create_workspace_folder(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        create_directory(shell_username, WAREHOUSE_REPO, body.path)
+        create_directory(org_id, shell_username, WAREHOUSE_REPO, body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"path": body.path}
@@ -121,9 +121,9 @@ async def rename_workspace_item(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        rename_path(shell_username, WAREHOUSE_REPO, body.old_path, body.new_path)
+        rename_path(org_id, shell_username, WAREHOUSE_REPO, body.old_path, body.new_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except FileExistsError as exc:
@@ -139,9 +139,9 @@ async def delete_workspace_file(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
+    org_id, shell_username, _ = await _get_workspace(user, db)
     try:
-        delete_path(shell_username, WAREHOUSE_REPO, body.path)
+        delete_path(org_id, shell_username, WAREHOUSE_REPO, body.path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -154,5 +154,5 @@ async def get_workspace_status(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
-    shell_username, _ = await _get_workspace(user, db)
-    return await git_status(shell_username, WAREHOUSE_REPO)
+    org_id, shell_username, _ = await _get_workspace(user, db)
+    return await git_status(org_id, shell_username, WAREHOUSE_REPO)
