@@ -14,11 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow as pa
 from faker import Faker
-from pyiceberg.catalog.sql import SqlCatalog
+from pyiceberg.catalog.rest import RestCatalog
 
-from app.config import (
-    DATABASE_URL_PLAIN, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION,
-)
+from app.config import LAKEKEEPER_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
 
 SEED = 42
 fake = Faker()
@@ -193,15 +191,13 @@ def main():
         sys.exit(1)
 
     org_id = sys.argv[1]
-    warehouse_path = f"s3://{org_id}/warehouse"
 
     print(f"Generating data for org {org_id}")
-    print(f"Warehouse: {warehouse_path}")
 
-    catalog = SqlCatalog(
+    catalog = RestCatalog(
         f"org-{org_id}",
-        uri=DATABASE_URL_PLAIN,
-        warehouse=warehouse_path,
+        uri=f"{LAKEKEEPER_URL}/catalog",
+        warehouse="warehouse",
         **{
             "s3.endpoint": S3_ENDPOINT,
             "s3.access-key-id": S3_ACCESS_KEY,

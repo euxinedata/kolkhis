@@ -1,23 +1,17 @@
 from functools import lru_cache
 
-from pyiceberg.catalog.sql import SqlCatalog
+from pyiceberg.catalog.rest import RestCatalog
 
-from app.config import (
-    DATABASE_URL_PLAIN,
-    S3_ACCESS_KEY,
-    S3_ENDPOINT,
-    S3_REGION,
-    S3_SECRET_KEY,
-)
+from app.config import LAKEKEEPER_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
 
 
 @lru_cache(maxsize=32)
-def get_org_catalog(org_id: str) -> SqlCatalog:
-    """Return a PyIceberg SqlCatalog scoped to an org's S3 bucket."""
-    return SqlCatalog(
+def get_org_catalog(org_id: str) -> RestCatalog:
+    """Return a PyIceberg RestCatalog backed by Lakekeeper."""
+    return RestCatalog(
         f"org-{org_id}",
-        uri=DATABASE_URL_PLAIN,
-        warehouse=f"s3://{org_id}/warehouse",
+        uri=f"{LAKEKEEPER_URL}/catalog",
+        warehouse="warehouse",
         **{
             "s3.endpoint": S3_ENDPOINT,
             "s3.access-key-id": S3_ACCESS_KEY,

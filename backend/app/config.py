@@ -27,12 +27,6 @@ DATABASE_URL_SYNC = (
     f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
 
-# PyIceberg needs a plain postgresql:// URI (no driver suffix)
-DATABASE_URL_PLAIN = (
-    f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-    f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-)
-
 WAREHOUSE_PATH = os.environ.get("WAREHOUSE_PATH", "/mnt/warehouse")
 RESULTS_PATH = os.environ.get("RESULTS_PATH", "/tmp/warehouse-results")
 
@@ -66,6 +60,9 @@ S3_RESULTS_ENDPOINT = os.environ.get("S3_RESULTS_ENDPOINT", S3_ENDPOINT)
 S3_RESULTS_ACCESS_KEY = os.environ.get("S3_RESULTS_ACCESS_KEY", S3_ACCESS_KEY)
 S3_RESULTS_SECRET_KEY = os.environ.get("S3_RESULTS_SECRET_KEY", S3_SECRET_KEY)
 S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
+
+# Lakekeeper Iceberg REST catalog
+LAKEKEEPER_URL = os.environ.get("LAKEKEEPER_URL", "http://localhost:8181")
 
 # Gitea configuration
 GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")
