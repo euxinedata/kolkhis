@@ -118,15 +118,42 @@ def read_file(org_id: str, shell_username: str, repo_name: str, path: str) -> st
     return target.read_text()
 
 
+def _chown_as_user(target: Path, org_id: str, shell_username: str) -> None:
+    """Set ownership of target to the shell user."""
+    uid = get_uid_for_user(org_id, shell_username)
+    if uid is not None:
+        os.chown(target, uid, uid)
+
+
 def write_file(org_id: str, shell_username: str, repo_name: str, path: str, content: str) -> None:
     target = _safe_path(org_id, shell_username, repo_name, path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    created_dirs = _mkdirs_new(target.parent, org_id, shell_username, repo_name)
     target.write_text(content)
+    _chown_as_user(target, org_id, shell_username)
+    for d in created_dirs:
+        _chown_as_user(d, org_id, shell_username)
+
+
+def _mkdirs_new(target: Path, org_id: str, shell_username: str, repo_name: str) -> list[Path]:
+    """Create parent directories and return list of newly created ones."""
+    root = _repo_path(org_id, shell_username, repo_name)
+    created: list[Path] = []
+    parts_to_create: list[Path] = []
+    current = target
+    while current != root and not current.exists():
+        parts_to_create.append(current)
+        current = current.parent
+    for d in reversed(parts_to_create):
+        d.mkdir(exist_ok=True)
+        created.append(d)
+    return created
 
 
 def create_directory(org_id: str, shell_username: str, repo_name: str, path: str) -> None:
     target = _safe_path(org_id, shell_username, repo_name, path)
-    target.mkdir(parents=True, exist_ok=True)
+    created = _mkdirs_new(target, org_id, shell_username, repo_name)
+    for d in created:
+        _chown_as_user(d, org_id, shell_username)
 
 
 def delete_path(org_id: str, shell_username: str, repo_name: str, path: str) -> None:
