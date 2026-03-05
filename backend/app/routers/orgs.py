@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
-from app.database import get_db
+from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import Organization, OrgMembership, User
+from app.shell import ensure_shell_user
+from app.workspace import ensure_clone
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,22 @@ test-paths: ["tests"]
 }
 
 
+async def _provision_workspace(
+    user_id: int, org_id: str, email: str, user_name: str,
+) -> None:
+    """Background task: provision shell user and clone warehouse repo."""
+    try:
+        async with async_session() as db:
+            shell_username, gitea_org = await ensure_shell_user(user_id, org_id, email, db)
+            await ensure_clone(
+                org_id, shell_username, WAREHOUSE_REPO,
+                user_name, email, owner=gitea_org,
+            )
+        logger.info("Workspace provisioned for user %d in org %s", user_id, org_id)
+    except Exception:
+        logger.exception("Background workspace provisioning failed for user %d in org %s", user_id, org_id)
+
+
 @router.post("")
 async def create_org(
     body: CreateOrgRequest,
@@ -118,6 +136,12 @@ async def create_org(
         raise HTTPException(status_code=502, detail="Failed to provision organization")
 
     await db.commit()
+
+    # Provision shell user + clone repo in background
+    asyncio.create_task(_provision_workspace(
+        user_id=int(auth["sub"]), org_id=org.id, email=auth.get("email", ""),
+        user_name=auth.get("name", ""),
+    ))
 
     return {"id": org.id, "name": org.name}
 
@@ -271,6 +295,17 @@ async def approve_member(
         raise HTTPException(status_code=404, detail="No pending membership found")
 
     membership.status = "active"
+
+    # Get user details for workspace provisioning
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one()
+
     await db.commit()
+
+    # Provision shell user + clone repo in background
+    asyncio.create_task(_provision_workspace(
+        user_id=user_id, org_id=org_id, email=user.email,
+        user_name=user.name,
+    ))
 
     return {"detail": "Member approved"}

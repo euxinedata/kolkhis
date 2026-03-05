@@ -13,7 +13,7 @@ import type {
   Disposable,
 } from 'react-complex-tree'
 import 'react-complex-tree/lib/style-modern.css'
-import { apiFetch } from '../api'
+import { apiFetch, ApiError } from '../api'
 import Terminal from '../components/Terminal'
 import { CatalogPanel } from '../components/CatalogPanel'
 import { useStatusBar } from '../StatusBarContext'
@@ -436,20 +436,38 @@ export function ProjectEditor() {
     }
   }, [])
 
+  const [preparing, setPreparing] = useState(false)
+
   // Initialize data provider
   useEffect(() => {
-    const provider = new FileTreeDataProvider(WORKSPACE_NAME)
-    dataProviderRef.current = provider
-    provider.loadDirectory('')
-      .then(() => {
-        setTreeKey(k => k + 1)
-        setLoading(false)
-      })
-      .catch(() => {
-        setError('Failed to load workspace')
-        setLoading(false)
-      })
-    loadStatus()
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const tryLoad = () => {
+      const provider = new FileTreeDataProvider(WORKSPACE_NAME)
+      dataProviderRef.current = provider
+      provider.loadDirectory('')
+        .then(() => {
+          if (cancelled) return
+          setPreparing(false)
+          setTreeKey(k => k + 1)
+          setLoading(false)
+          loadStatus()
+        })
+        .catch((err) => {
+          if (cancelled) return
+          if (err instanceof ApiError && err.status === 503) {
+            setPreparing(true)
+            timer = setTimeout(tryLoad, 2000)
+          } else {
+            setError('Failed to load workspace')
+            setLoading(false)
+          }
+        })
+    }
+    tryLoad()
+
+    return () => { cancelled = true; clearTimeout(timer) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close context menu on click outside or Escape
@@ -938,6 +956,7 @@ export function ProjectEditor() {
     return () => el.removeEventListener('contextmenu', handler)
   }, [treeKey]) // re-attach when tree remounts
 
+  if (loading && preparing) return <p style={{ color: '#8888bb', padding: '1em' }}>Preparing workspace...</p>
   if (loading) return <p style={{ color: '#8888bb', padding: '1em' }}>Loading...</p>
   if (error) return <p style={{ color: '#f87171', padding: '1em' }}>{error}</p>
   if (!dataProviderRef.current) return null

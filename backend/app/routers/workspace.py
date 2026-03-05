@@ -8,8 +8,9 @@ from app.auth import require_auth
 from app.database import get_db
 from app.shell import ensure_shell_user
 from app.workspace import (
-    ensure_clone, list_files as ws_list_files, read_file, write_file,
+    list_files as ws_list_files, read_file, write_file,
     create_directory, rename_path, delete_path, git_status,
+    is_clone_ready,
 )
 
 router = APIRouter(prefix="/api/workspace")
@@ -47,11 +48,8 @@ async def _get_workspace(user: dict, db: AsyncSession) -> tuple[str, str, str]:
     shell_username, gitea_org = await ensure_shell_user(
         _user_id(user), org_id, user.get("email", ""), db,
     )
-    await ensure_clone(
-        org_id, shell_username, WAREHOUSE_REPO,
-        user.get("name", ""), user.get("email", ""),
-        owner=gitea_org,
-    )
+    if not is_clone_ready(org_id, shell_username, WAREHOUSE_REPO):
+        raise HTTPException(status_code=503, detail="Workspace is being prepared")
     return org_id, shell_username, gitea_org
 
 

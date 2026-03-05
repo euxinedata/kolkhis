@@ -9,7 +9,7 @@ from app.auth import verify_token
 from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_KEY_PATH
 from app.database import async_session
 from app.shell import ensure_shell_user
-from app.workspace import ensure_clone
+from app.workspace import is_clone_ready
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -42,16 +42,18 @@ async def terminal_ws(websocket: WebSocket):
     user_id = int(payload["sub"])
     user_email = payload.get("email", "")
     org_id = payload.get("org_id")
-    user_name = payload.get("name", "")
 
     if not org_id:
         await websocket.close(code=4403, reason="No organization selected")
         return
 
-    # Ensure shell user and clone warehouse repo
+    # Look up shell username
     async with async_session() as session:
-        shell_username, gitea_org = await ensure_shell_user(user_id, org_id, user_email, session)
-        await ensure_clone(org_id, shell_username, WAREHOUSE_REPO, user_name, user_email, owner=gitea_org)
+        shell_username, _ = await ensure_shell_user(user_id, org_id, user_email, session)
+
+    if not is_clone_ready(org_id, shell_username, WAREHOUSE_REPO):
+        await websocket.close(code=4503, reason="Workspace is being prepared")
+        return
 
     await websocket.accept()
 

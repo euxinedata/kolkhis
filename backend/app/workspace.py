@@ -85,6 +85,11 @@ async def ensure_clone(
         await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name, owner), cwd=dest)
 
 
+def is_clone_ready(org_id: str, shell_username: str, repo_name: str) -> bool:
+    """Check if the repo clone exists on disk."""
+    return _repo_path(org_id, shell_username, repo_name).exists()
+
+
 def remove_repo(org_id: str, shell_username: str, repo_name: str) -> None:
     dest = _repo_path(org_id, shell_username, repo_name)
     if dest.exists():
