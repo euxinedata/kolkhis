@@ -25,7 +25,13 @@ chown kolkhis-worker:kolkhis-worker /etc/kolkhis-worker
 cd /opt/kolkhis-worker
 rm -rf .venv __pycache__
 uv venv --python python3.12
-uv pip install --python .venv/bin/python -e .
+uv pip install --python .venv/bin/python \
+  'fastapi>=0.115' \
+  'uvicorn>=0.34' \
+  'duckdb>=1.2' \
+  'pyarrow>=19' \
+  'python-dotenv>=1.0' \
+  'httpx>=0.27'
 
 # Pre-download DuckDB extensions into the worker's home directory
 .venv/bin/python -c "
