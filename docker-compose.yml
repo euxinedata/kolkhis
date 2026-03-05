@@ -84,6 +84,53 @@ services:
     volumes:
       - ./backend/data/homes:/home
 
+  dagster-init:
+    image: postgres:17
+    depends_on:
+      - db
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+    entrypoint: >
+      sh -c "until pg_isready -h db -U ${POSTGRES_USER}; do sleep 1; done &&
+      psql -h db -U ${POSTGRES_USER} -d ${POSTGRES_DB} -tc \"SELECT 1 FROM pg_database WHERE datname = 'dagster'\" | grep -q 1 ||
+      psql -h db -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c \"CREATE DATABASE dagster\""
+    restart: "no"
+
+  dagster-code:
+    build: ./docker/dagster
+    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "3030"]
+    environment:
+      - DAGSTER_PG_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dagster
+      - DAGSTER_HOME=/opt/dagster
+    volumes:
+      - ./docker/dagster/dagster-local.yaml:/opt/dagster/dagster.yaml
+    depends_on:
+      - dagster-init
+
+  dagster-webserver:
+    build: ./docker/dagster
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/opt/dagster/workspace.yaml"]
+    ports:
+      - "3030:3000"
+    environment:
+      - DAGSTER_PG_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dagster
+      - DAGSTER_HOME=/opt/dagster
+    volumes:
+      - ./docker/dagster/dagster-local.yaml:/opt/dagster/dagster.yaml
+    depends_on:
+      - dagster-code
+
+  dagster-daemon:
+    build: ./docker/dagster
+    command: ["dagster-daemon", "run", "-w", "/opt/dagster/workspace.yaml"]
+    environment:
+      - DAGSTER_PG_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dagster
+      - DAGSTER_HOME=/opt/dagster
+    volumes:
+      - ./docker/dagster/dagster-local.yaml:/opt/dagster/dagster.yaml
+    depends_on:
+      - dagster-code
+
 volumes:
   pgdata:
   minio-data:
