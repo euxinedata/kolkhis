@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, SHELL_MODE, LAKEKEEPER_URL
+from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, LAKEKEEPER_URL
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import Organization, OrgMembership, User
@@ -35,27 +35,17 @@ class ApproveMemberRequest(BaseModel):
     user_id: int
 
 
-async def _create_org_bucket(org_id: str) -> None:
-    """Create an S3 bucket for the org and register a Lakekeeper warehouse."""
+async def _create_org_storage(org_id: str) -> None:
+    """Create org prefix in shared S3 bucket and register a Lakekeeper warehouse."""
     fs = s3fs.S3FileSystem(
         endpoint_url=S3_ENDPOINT,
         key=S3_ACCESS_KEY,
         secret=S3_SECRET_KEY,
         client_kwargs={"region_name": S3_REGION},
     )
-    await asyncio.to_thread(fs.mkdir, org_id)
+    await asyncio.to_thread(fs.mkdirs, f"{S3_BUCKET_NAME}/{org_id}", exist_ok=True)
 
-    # Wait for bucket to be available
-    def _wait_for_bucket():
-        import time
-        for _ in range(10):
-            if fs.exists(org_id):
-                return
-            time.sleep(1)
-        raise Exception(f"S3 bucket {org_id} not available after creation")
-    await asyncio.to_thread(_wait_for_bucket)
-
-    # Register warehouse in Lakekeeper
+    # Register per-org warehouse in Lakekeeper with key-prefix
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{LAKEKEEPER_URL}/management/v1/warehouse",
@@ -67,7 +57,8 @@ async def _create_org_bucket(org_id: str) -> None:
                 "warehouse-name": org_id,
                 "storage-profile": {
                     "type": "s3",
-                    "bucket": org_id,
+                    "bucket": S3_BUCKET_NAME,
+                    "key-prefix": org_id,
                     "region": S3_REGION,
                     "flavor": "s3-compat",
                     "endpoint": S3_ENDPOINT,
@@ -205,7 +196,7 @@ async def create_org(
             message="Initialize warehouse scaffold",
             owner=org.id,
         )
-        await _create_org_bucket(org.id)
+        await _create_org_storage(org.id)
     except Exception as exc:
         logger.error("Org provisioning failed for %s: %s", org.id, exc)
         raise HTTPException(status_code=502, detail="Failed to provision organization")
