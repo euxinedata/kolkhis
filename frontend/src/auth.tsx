@@ -7,6 +7,7 @@ interface User {
   email: string;
   name: string;
   org_id: string | null;
+  org_role: string | null;
 }
 
 interface AuthState {

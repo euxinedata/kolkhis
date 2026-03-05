@@ -10,8 +10,9 @@ import { Settings } from './pages/Settings.tsx'
 import { Engineering } from './pages/Engineering.tsx'
 import { Placeholder } from './pages/Placeholder.tsx'
 import { Onboarding } from './pages/Onboarding.tsx'
+import { Members } from './pages/Members.tsx'
 import kolkhisLogo from './assets/kolkhis.svg'
-import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Logs, Settings as SettingsIcon } from 'lucide-react'
+import { Table, CodeXml, LayoutDashboard, Server, ReceiptText, Logs, Users, Settings as SettingsIcon } from 'lucide-react'
 import { StatusBarProvider, useStatusBar } from './StatusBarContext.tsx'
 import './App.css'
 
@@ -151,6 +152,19 @@ function App() {
             </div>
             <div className="sidebar-item">
               <button
+                className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'members') ? 'active' : ''}`}
+                onClick={() => navigate('/members')}
+                title="Members"
+              >
+                <Users size={20} />
+              </button>
+              <div className="sidebar-flyout">
+                <div className="sidebar-flyout-title">Members</div>
+                <NavLink to="/members" className="sidebar-flyout-link">Members</NavLink>
+              </div>
+            </div>
+            <div className="sidebar-item">
+              <button
                 className={`sidebar-icon-btn ${isBottomActive(location.pathname, 'settings') ? 'active' : ''}`}
                 onClick={() => navigate('/settings')}
                 title="Settings"
@@ -170,6 +184,7 @@ function App() {
             <Route path="/resources" element={<Resources />} />
             <Route path="/history" element={<QueryHistory />} />
             <Route path="/billing" element={<Billing />} />
+            <Route path="/members" element={<Members />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/engineering" element={<Engineering />} />
             <Route path="/reporting" element={<Placeholder view="reporting" />} />

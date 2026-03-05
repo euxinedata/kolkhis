@@ -30,7 +30,7 @@ def _cookie_kwargs() -> dict:
     return dict(secure=False, samesite="lax")
 
 
-def _make_token(user: User, org_id: str | None = None) -> str:
+def _make_token(user: User, org_id: str | None = None, org_role: str | None = None) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
@@ -39,6 +39,8 @@ def _make_token(user: User, org_id: str | None = None) -> str:
     }
     if org_id:
         payload["org_id"] = org_id
+    if org_role:
+        payload["org_role"] = org_role
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
@@ -84,13 +86,15 @@ async def callback_google(request: Request):
         )
         memberships = result.scalars().all()
 
-    org_id = memberships[0].org_id if memberships else None
+    membership = memberships[0] if memberships else None
+    org_id = membership.org_id if membership else None
+    org_role = membership.role if membership else None
     redirect_url = FRONTEND_URL if org_id else f"{FRONTEND_URL}/onboarding"
 
     response = RedirectResponse(url=redirect_url)
     response.set_cookie(
         _COOKIE_NAME,
-        _make_token(user, org_id),
+        _make_token(user, org_id, org_role),
         httponly=True,
         max_age=7 * 24 * 3600,
         **_cookie_kwargs(),
@@ -125,6 +129,7 @@ async def me(request: Request):
         "email": payload["email"],
         "name": payload["name"],
         "org_id": payload.get("org_id"),
+        "org_role": payload.get("org_role"),
     }
 
 
@@ -160,7 +165,7 @@ async def switch_org(request: Request):
     response = JSONResponse({"detail": "Switched organization", "org_id": org_id})
     response.set_cookie(
         _COOKIE_NAME,
-        _make_token(user, org_id),
+        _make_token(user, org_id, membership.role),
         httponly=True,
         max_age=7 * 24 * 3600,
         **_cookie_kwargs(),
