@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET, FRONTEND_URL
 from app.database import async_session
-from app.models import User
+from app.models import OrgMembership, User
 
 router = APIRouter(prefix="/auth")
 
@@ -30,13 +30,15 @@ def _cookie_kwargs() -> dict:
     return dict(secure=False, samesite="lax")
 
 
-def _make_token(user: User) -> str:
+def _make_token(user: User, org_id: str | None = None) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
         "name": user.name,
         "exp": datetime.now(timezone.utc) + timedelta(days=7),
     }
+    if org_id:
+        payload["org_id"] = org_id
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
@@ -73,10 +75,22 @@ async def callback_google(request: Request):
         await session.commit()
         await session.refresh(user)
 
-    response = RedirectResponse(url=FRONTEND_URL)
+        # Check for active org memberships
+        result = await session.execute(
+            select(OrgMembership).where(
+                OrgMembership.user_id == user.id,
+                OrgMembership.status == "active",
+            )
+        )
+        memberships = result.scalars().all()
+
+    org_id = memberships[0].org_id if memberships else None
+    redirect_url = FRONTEND_URL if org_id else f"{FRONTEND_URL}/onboarding"
+
+    response = RedirectResponse(url=redirect_url)
     response.set_cookie(
         _COOKIE_NAME,
-        _make_token(user),
+        _make_token(user, org_id),
         httponly=True,
         max_age=7 * 24 * 3600,
         **_cookie_kwargs(),
@@ -106,7 +120,52 @@ async def me(request: Request):
     payload = verify_token(request)
     if payload is None:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
-    return {"id": payload["sub"], "email": payload["email"], "name": payload["name"]}
+    return {
+        "id": payload["sub"],
+        "email": payload["email"],
+        "name": payload["name"],
+        "org_id": payload.get("org_id"),
+    }
+
+
+@router.post("/switch-org")
+async def switch_org(request: Request):
+    payload = verify_token(request)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    org_id = body.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+
+    user_id = int(payload["sub"])
+    async with async_session() as session:
+        result = await session.execute(
+            select(OrgMembership).where(
+                OrgMembership.user_id == user_id,
+                OrgMembership.org_id == org_id,
+                OrgMembership.status == "active",
+            )
+        )
+        membership = result.scalar_one_or_none()
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this organization")
+
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one()
+
+    response = JSONResponse({"detail": "Switched organization", "org_id": org_id})
+    response.set_cookie(
+        _COOKIE_NAME,
+        _make_token(user, org_id),
+        httponly=True,
+        max_age=7 * 24 * 3600,
+        **_cookie_kwargs(),
+    )
+    return response
 
 
 @router.post("/logout")

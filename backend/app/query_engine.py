@@ -30,7 +30,7 @@ from app.config import (
 from app.database import async_session
 from app.models import CatalogObject, Database, QueryJob, Schema, WorkerVM
 from app.sql_rewriter import rewrite
-from app.warehouse import catalog
+from app.warehouse import get_org_catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
 _running_conns: dict[str, duckdb.DuckDBPyConnection] = {}
@@ -241,7 +241,7 @@ def _run_duckdb(sql: str, job_id: str, catalog_objects: list[dict]) -> int:
 
             qualified_name = f'{full_schema}."{obj["name"]}"'
             if obj["object_type"] == "table" and obj["iceberg_identifier"]:
-                tbl = catalog.load_table(obj["iceberg_identifier"])
+                tbl = get_org_catalog("TODO").load_table(obj["iceberg_identifier"])
                 metadata_path = tbl.metadata_location
                 conn.execute(
                     f"CREATE VIEW {qualified_name} AS "

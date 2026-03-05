@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import HOMES_PATH, SHELL_SSH_PUBKEY_PATH
-from app.models import User
+from app.models import OrgMembership
 
 log = logging.getLogger(__name__)
 
@@ -150,25 +150,31 @@ def provision_shell_user(shell_username: str) -> None:
     log.info("Provisioned shell user: %s (uid=%d)", shell_username, uid)
 
 
-async def ensure_shell_user(user_id: int, email: str, db: AsyncSession) -> str:
-    """Return the user's shell_username, provisioning if needed."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one()
+async def ensure_shell_user(user_id: int, org_id: str, email: str, db: AsyncSession) -> tuple[str, str]:
+    """Return (shell_username, org_id), provisioning if needed."""
+    result = await db.execute(
+        select(OrgMembership).where(
+            OrgMembership.user_id == user_id,
+            OrgMembership.org_id == org_id,
+            OrgMembership.status == "active",
+        )
+    )
+    membership = result.scalar_one()
 
-    if user.shell_username:
-        return user.shell_username
+    if membership.shell_username:
+        return membership.shell_username, org_id
 
     username = generate_shell_username(email)
 
     # Check for collision
     existing = await db.execute(
-        select(User).where(User.shell_username == username)
+        select(OrgMembership).where(OrgMembership.shell_username == username)
     )
     if existing.scalar() is not None:
         username = f"{username}-{user_id}"[:32]
 
     await asyncio.to_thread(provision_shell_user, username)
 
-    user.shell_username = username
+    membership.shell_username = username
     await db.commit()
-    return username
+    return username, org_id

@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pyiceberg.catalog.sql import SqlCatalog
 
 from app.config import (
@@ -6,21 +8,20 @@ from app.config import (
     S3_ENDPOINT,
     S3_REGION,
     S3_SECRET_KEY,
-    WAREHOUSE_PATH,
-    is_s3_warehouse,
 )
 
-_catalog_props: dict[str, str] = {
-    "uri": DATABASE_URL_PLAIN,
-    "warehouse": WAREHOUSE_PATH,
-}
 
-if is_s3_warehouse():
-    _catalog_props.update({
-        "s3.endpoint": S3_ENDPOINT,
-        "s3.access-key-id": S3_ACCESS_KEY,
-        "s3.secret-access-key": S3_SECRET_KEY,
-        "s3.region": S3_REGION,
-    })
-
-catalog = SqlCatalog("kolkhis", **_catalog_props)
+@lru_cache(maxsize=32)
+def get_org_catalog(org_id: str) -> SqlCatalog:
+    """Return a PyIceberg SqlCatalog scoped to an org's S3 bucket."""
+    return SqlCatalog(
+        f"org-{org_id}",
+        uri=DATABASE_URL_PLAIN,
+        warehouse=f"s3://{org_id}/warehouse",
+        **{
+            "s3.endpoint": S3_ENDPOINT,
+            "s3.access-key-id": S3_ACCESS_KEY,
+            "s3.secret-access-key": S3_SECRET_KEY,
+            "s3.region": S3_REGION,
+        },
+    )

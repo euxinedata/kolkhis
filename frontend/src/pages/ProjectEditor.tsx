@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
 import { Editor } from '@monaco-editor/react'
 import {
   UncontrolledTreeEnvironment,
@@ -22,12 +21,6 @@ import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/Catalo
 import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
 import './ProjectEditor.css'
 
-interface Project {
-  id: string
-  name: string
-  description: string
-  created_at: string
-}
 
 interface FileEntry {
   name: string
@@ -67,21 +60,19 @@ interface EditorSession {
   nextTerminalId: number
 }
 
-function sessionKey(projectId: string): string {
-  return `kolkhis-editor-session-${projectId}`
-}
+const SESSION_KEY = 'kolkhis-editor-session-workspace'
 
-function loadSession(projectId: string): EditorSession | null {
+function loadSession(): EditorSession | null {
   try {
-    const raw = localStorage.getItem(sessionKey(projectId))
+    const raw = localStorage.getItem(SESSION_KEY)
     if (!raw) return null
     return JSON.parse(raw)
   } catch { return null }
 }
 
-function saveSession(projectId: string, session: EditorSession): void {
+function saveSession(session: EditorSession): void {
   try {
-    localStorage.setItem(sessionKey(projectId), JSON.stringify(session))
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
   } catch { /* storage full — ignore */ }
 }
 
@@ -135,10 +126,8 @@ function folderIconUrl(isOpen: boolean): string {
 class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
   private items: Record<string, TreeItem<FileEntry>> = {}
   private listeners: Array<(ids: TreeItemIndex[]) => void> = []
-  private projectId: string
 
-  constructor(projectId: string, projectName: string) {
-    this.projectId = projectId
+  constructor(repoName: string) {
     // Hidden container (never rendered)
     this.items['root'] = {
       index: 'root',
@@ -155,7 +144,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
       children: [],
       canRename: false,
       canMove: false,
-      data: { name: projectName, path: '', type: 'dir', size: 0 },
+      data: { name: repoName, path: '', type: 'dir', size: 0 },
     }
   }
 
@@ -179,7 +168,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
     if (!force && existing?.children && existing.children.length > 0) return
 
     const entries = await apiFetch<FileEntry[]>(
-      `/api/projects/${this.projectId}/files?path=${encodeURIComponent(dirPath)}`
+      `/api/workspace/files?path=${encodeURIComponent(dirPath)}`
     )
 
     // Sort: dirs first, then files, alphabetically
@@ -275,7 +264,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
         ? { path: fullPath }
         : { path: fullPath, content: '' }
 
-      await apiFetch(`/api/projects/${this.projectId}/${endpoint}`, {
+      await apiFetch(`/api/workspace/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -290,7 +279,7 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
       const newPath = parentDir ? `${parentDir}/${name}` : name
       if (newPath === oldId) return
 
-      await apiFetch(`/api/projects/${this.projectId}/rename`, {
+      await apiFetch(`/api/workspace/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_path: oldId, new_path: newPath }),
@@ -308,16 +297,14 @@ class FileTreeDataProvider implements TreeDataProvider<FileEntry> {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function ProjectEditor() {
-  const { projectId } = useParams<{ projectId: string }>()
-  const navigate = useNavigate()
+const WORKSPACE_NAME = 'warehouse'
 
-  const [project, setProject] = useState<Project | null>(null)
+export function ProjectEditor() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // Load saved session
-  const savedSession = projectId ? loadSession(projectId) : null
+  const savedSession = loadSession()
 
   // Tab/editor state
   const [openTabs, setOpenTabs] = useState<OpenTab[]>(savedSession?.openTabs ?? [])
@@ -382,7 +369,6 @@ export function ProjectEditor() {
   // Persist session to localStorage (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!projectId) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       // Snapshot cursor/scroll from live editor into tabs before persisting
@@ -397,7 +383,7 @@ export function ProjectEditor() {
           tabs[idx] = { ...tabs[idx], cursorLine: pos?.lineNumber ?? 1, cursorColumn: pos?.column ?? 1, scrollTop: scroll ?? 0 }
         }
       }
-      saveSession(projectId, {
+      saveSession({
         openTabs: tabs,
         activeTab: activeTabRef.current,
         terminalTabs,
@@ -409,11 +395,10 @@ export function ProjectEditor() {
       })
     }, 300)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [projectId, openTabs, activeTab, terminalTabs, activeTerminalTab, terminalOpen, terminalHeight, treeWidth])
+  }, [openTabs, activeTab, terminalTabs, activeTerminalTab, terminalOpen, terminalHeight, treeWidth])
 
   // Save immediately on unmount (captures cursor position)
   useEffect(() => {
-    if (!projectId) return
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       const tabs = [...openTabsRef.current]
@@ -427,7 +412,7 @@ export function ProjectEditor() {
           tabs[idx] = { ...tabs[idx], cursorLine: pos?.lineNumber ?? 1, cursorColumn: pos?.column ?? 1, scrollTop: scroll ?? 0 }
         }
       }
-      saveSession(projectId, {
+      saveSession({
         openTabs: tabs,
         activeTab: activeTabRef.current,
         terminalTabs: terminalTabsRef.current,
@@ -438,57 +423,34 @@ export function ProjectEditor() {
         nextTerminalId: nextTerminalId.current,
       })
     }
-  }, [projectId])
+  }, [])
 
   const loadStatus = useCallback(async () => {
-    if (!projectId) return
     try {
       const data = await apiFetch<Record<string, string>>(
-        `/api/projects/${projectId}/status`
+        `/api/workspace/status`
       )
       setVcsStatus(data)
     } catch {
       // ignore — status is optional
     }
-  }, [projectId])
+  }, [])
 
-  // VCS class helpers — will be used once we add custom styling back
-  // function vcsClass(path: string): string {
-  //   const status = vcsStatus[path]
-  //   if (status === 'new') return 'vcs-new'
-  //   if (status === 'modified') return 'vcs-modified'
-  //   if (status === 'deleted') return 'vcs-deleted'
-  //   return ''
-  // }
-  // function vcsDirClass(dirPath: string): string {
-  //   const prefix = dirPath ? dirPath + '/' : ''
-  //   for (const p of Object.keys(vcsStatus)) {
-  //     if (p.startsWith(prefix)) return 'vcs-dir-changed'
-  //   }
-  //   return ''
-  // }
-
-  // Fetch project metadata
+  // Initialize data provider
   useEffect(() => {
-    if (!projectId) return
-    apiFetch<Project[]>('/api/projects')
-      .then(projects => {
-        const p = projects.find(p => p.id === projectId)
-        if (p) setProject(p)
-        else setError('Project not found')
-      })
-      .catch(() => setError('Failed to load project'))
-      .finally(() => setLoading(false))
-  }, [projectId])
-
-  // Initialize data provider when project is loaded
-  useEffect(() => {
-    if (!projectId || !project) return
-    const provider = new FileTreeDataProvider(projectId, project.name)
+    const provider = new FileTreeDataProvider(WORKSPACE_NAME)
     dataProviderRef.current = provider
-    provider.loadDirectory('').then(() => setTreeKey(k => k + 1))
+    provider.loadDirectory('')
+      .then(() => {
+        setTreeKey(k => k + 1)
+        setLoading(false)
+      })
+      .catch(() => {
+        setError('Failed to load workspace')
+        setLoading(false)
+      })
     loadStatus()
-  }, [projectId, project]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close context menu on click outside or Escape
   useEffect(() => {
@@ -634,7 +596,7 @@ export function ProjectEditor() {
     setFileLoading(true)
     try {
       const data = await apiFetch<{ path: string; content: string }>(
-        `/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`
+        `/api/workspace/file?path=${encodeURIComponent(path)}`
       )
       setOpenTabs(prev => prev.some(t => t.path === path)
         ? prev
@@ -685,11 +647,11 @@ export function ProjectEditor() {
   async function saveActiveTab() {
     const currentActive = activeTabRef.current
     const currentTabs = openTabsRef.current
-    if (!currentActive || !projectId) return
+    if (!currentActive) return
     const tab = currentTabs.find(t => t.path === currentActive)
     if (!tab || tab.content === tab.savedContent) return
     try {
-      await apiFetch(`/api/projects/${projectId}/files`, {
+      await apiFetch(`/api/workspace/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: tab.path, content: tab.content }),
@@ -817,12 +779,12 @@ export function ProjectEditor() {
   }
 
   async function handleDeleteAction() {
-    if (!contextTarget || !projectId || !dataProviderRef.current) return
+    if (!contextTarget || !dataProviderRef.current) return
     const path = contextTarget
     setContextMenu(null)
     setContextTarget(null)
 
-    await apiFetch(`/api/projects/${projectId}/files`, {
+    await apiFetch(`/api/workspace/files`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
@@ -889,7 +851,7 @@ export function ProjectEditor() {
     provider.getTreeItem(id).then(item => {
       if (!item.isFolder) openFile(id)
     })
-  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleExpandItem = useCallback((item: TreeItem<FileEntry>) => {
     const id = String(item.index)
@@ -978,17 +940,10 @@ export function ProjectEditor() {
 
   if (loading) return <p style={{ color: '#8888bb', padding: '1em' }}>Loading...</p>
   if (error) return <p style={{ color: '#f87171', padding: '1em' }}>{error}</p>
-  if (!project) return null
   if (!dataProviderRef.current) return null
 
   return (
     <div className="project-editor">
-      <div className="project-editor-header">
-        <button className="project-back-btn" onClick={() => navigate('/engineering')}>
-          ← Projects
-        </button>
-        <span className="project-editor-name">{project.name}</span>
-      </div>
       <div className="project-editor-body">
         <div className="file-tree-panel" style={{ width: treeWidth, minWidth: treeWidth }}>
           <div className="sidebar-tabs">
@@ -1225,7 +1180,6 @@ export function ProjectEditor() {
                       width: '100%', height: '100%',
                     }}>
                       <Terminal
-                        projectId={projectId!}
                         tabId={tab.id}
                         visible={tab.id === activeTerminalTab}
                       />

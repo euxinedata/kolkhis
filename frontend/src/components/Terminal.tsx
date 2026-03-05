@@ -5,12 +5,11 @@ import '@xterm/xterm/css/xterm.css'
 import { API_URL } from '../api'
 
 interface TerminalProps {
-  projectId: string
   tabId: number
   visible: boolean
 }
 
-export default function Terminal({ projectId, tabId, visible }: TerminalProps) {
+export default function Terminal({ tabId, visible }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -48,7 +47,7 @@ export default function Terminal({ projectId, tabId, visible }: TerminalProps) {
 
     // Build WebSocket URL from API_URL
     const wsBase = API_URL.replace(/^http/, 'ws')
-    const ws = new WebSocket(`${wsBase}/api/projects/${projectId}/terminal`)
+    const ws = new WebSocket(`${wsBase}/api/terminal`)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
@@ -100,7 +99,7 @@ export default function Terminal({ projectId, tabId, visible }: TerminalProps) {
       fitRef.current = null
       wsRef.current = null
     }
-  }, [projectId, tabId])
+  }, [tabId])
 
   return (
     <div

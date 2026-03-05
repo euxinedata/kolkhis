@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -19,6 +20,14 @@ class Item(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -27,9 +36,21 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     name: Mapped[str] = mapped_column(String(255))
     picture_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
-    shell_username: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class OrgMembership(Base):
+    __tablename__ = "org_memberships"
+    __table_args__ = (UniqueConstraint("user_id", "org_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"))
+    role: Mapped[str] = mapped_column(String(20), default="member")  # admin, member
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, active
+    shell_username: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class QueryJob(Base):
@@ -129,18 +150,6 @@ class ServerTypeRate(Base):
     hourly_rate_eur: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
-
-class Project(Base):
-    __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("user_id", "name"),)
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    name: Mapped[str] = mapped_column(String(255))
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    gitea_repo_name: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class UserApiToken(Base):

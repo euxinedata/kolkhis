@@ -14,16 +14,16 @@ def _repo_path(shell_username: str, repo_name: str) -> Path:
     return Path(HOMES_PATH).resolve() / shell_username / "projects" / repo_name
 
 
-def _clone_url(repo_name: str) -> str:
+def _clone_url(repo_name: str, owner: str = GITEA_ADMIN_USER) -> str:
     from app.gitea import _api_token
     parsed = urlparse(GITEA_URL)
-    return f"{parsed.scheme}://{GITEA_ADMIN_USER}:{_api_token}@{parsed.netloc}/{GITEA_ADMIN_USER}/{repo_name}.git"
+    return f"{parsed.scheme}://{GITEA_ADMIN_USER}:{_api_token}@{parsed.netloc}/{owner}/{repo_name}.git"
 
 
-def _shell_remote_url(repo_name: str) -> str:
+def _shell_remote_url(repo_name: str, owner: str = GITEA_ADMIN_USER) -> str:
     from app.gitea import _api_token
     parsed = urlparse(GITEA_SHELL_URL)
-    return f"{parsed.scheme}://{GITEA_ADMIN_USER}:{_api_token}@{parsed.netloc}/{GITEA_ADMIN_USER}/{repo_name}.git"
+    return f"{parsed.scheme}://{GITEA_ADMIN_USER}:{_api_token}@{parsed.netloc}/{owner}/{repo_name}.git"
 
 
 def _safe_path(shell_username: str, repo_name: str, path: str) -> Path:
@@ -47,12 +47,16 @@ async def _run_git(*args: str, cwd: Path) -> str:
     return stdout.decode()
 
 
-async def clone_repo(shell_username: str, repo_name: str, user_name: str = "", user_email: str = "") -> None:
+async def clone_repo(
+    shell_username: str, repo_name: str,
+    user_name: str = "", user_email: str = "",
+    owner: str = GITEA_ADMIN_USER,
+) -> None:
     dest = _repo_path(shell_username, repo_name)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    await _run_git("clone", _clone_url(repo_name), str(dest), cwd=dest.parent)
+    await _run_git("clone", _clone_url(repo_name, owner), str(dest), cwd=dest.parent)
     # Set remote to shell-accessible URL (may differ from backend URL in local dev)
-    await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name), cwd=dest)
+    await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name, owner), cwd=dest)
     if user_name:
         await _run_git("config", "user.name", user_name, cwd=dest)
     if user_email:
@@ -63,13 +67,17 @@ async def clone_repo(shell_username: str, repo_name: str, user_name: str = "", u
         chown_recursive(dest, uid, uid)
 
 
-async def ensure_clone(shell_username: str, repo_name: str, user_name: str = "", user_email: str = "") -> None:
+async def ensure_clone(
+    shell_username: str, repo_name: str,
+    user_name: str = "", user_email: str = "",
+    owner: str = GITEA_ADMIN_USER,
+) -> None:
     dest = _repo_path(shell_username, repo_name)
     if not dest.exists():
-        await clone_repo(shell_username, repo_name, user_name, user_email)
+        await clone_repo(shell_username, repo_name, user_name, user_email, owner)
     else:
         # Update remote URL so the token stays current after backend restarts
-        await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name), cwd=dest)
+        await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name, owner), cwd=dest)
 
 
 def remove_repo(shell_username: str, repo_name: str) -> None:
