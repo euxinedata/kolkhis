@@ -1,0 +1,123 @@
+.onboarding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 0.8em;
+  padding: 2em;
+}
+
+.onboarding-logo {
+  width: 72px;
+  height: 72px;
+}
+
+.onboarding h2 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+.onboarding-muted {
+  color: #909090;
+  margin: 0;
+  text-align: center;
+  max-width: 360px;
+}
+
+.onboarding-choices {
+  display: flex;
+  gap: 1em;
+  margin-top: 1em;
+}
+
+.onboarding-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+  padding: 1.5em 2em;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  background: #1a1a1a;
+  cursor: pointer;
+  min-width: 180px;
+  transition: border-color 0.15s;
+}
+.onboarding-choice:hover {
+  border-color: #d4850a;
+}
+
+.choice-title {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+.choice-desc {
+  color: #909090;
+  font-size: 0.8em;
+}
+
+.onboarding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  width: 300px;
+  margin-top: 0.5em;
+}
+
+.onboarding-form input {
+  padding: 0.5em 0.8em;
+  font-size: 0.95em;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+.onboarding-form input:focus {
+  outline: none;
+  border-color: #d4850a;
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: 0.6em;
+  justify-content: flex-end;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid #2a2a2a;
+  color: #909090;
+}
+.btn-secondary:hover {
+  border-color: #555;
+  color: #e0e0e0;
+}
+
+.onboarding-error {
+  color: #e05050;
+  margin: 0;
+  font-size: 0.85em;
+}
+
+.onboarding-org-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  width: 300px;
+  margin-top: 0.5em;
+}
+
+.onboarding-org-item {
+  padding: 0.7em 1em;
+  text-align: left;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.onboarding-org-item:hover {
+  border-color: #d4850a;
+}

@@ -4,13 +4,12 @@ import logging
 
 import asyncssh
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
 
 from app.auth import verify_token
 from app.config import SHELL_SSH_HOST, SHELL_SSH_PORT, SHELL_SSH_KEY_PATH
 from app.database import async_session
-from app.models import Project, User
 from app.shell import ensure_shell_user
+from app.workspace import is_clone_ready
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -29,8 +28,11 @@ def _verify_ws_token(websocket: WebSocket) -> dict | None:
         return None
 
 
-@router.websocket("/api/projects/{project_id}/terminal")
-async def terminal_ws(websocket: WebSocket, project_id: str):
+WAREHOUSE_REPO = "warehouse"
+
+
+@router.websocket("/api/terminal")
+async def terminal_ws(websocket: WebSocket):
     # Authenticate
     payload = _verify_ws_token(websocket)
     if payload is None:
@@ -39,18 +41,19 @@ async def terminal_ws(websocket: WebSocket, project_id: str):
 
     user_id = int(payload["sub"])
     user_email = payload.get("email", "")
+    org_id = payload.get("org_id")
 
-    # Look up project and ensure shell user
+    if not org_id:
+        await websocket.close(code=4403, reason="No organization selected")
+        return
+
+    # Look up shell username
     async with async_session() as session:
-        result = await session.execute(
-            select(Project).where(Project.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if project is None:
-            await websocket.close(code=4404, reason="Project not found")
-            return
+        shell_username, _ = await ensure_shell_user(user_id, org_id, user_email, session)
 
-        shell_username = await ensure_shell_user(user_id, user_email, session)
+    if not is_clone_ready(org_id, shell_username, WAREHOUSE_REPO):
+        await websocket.close(code=4503, reason="Workspace is being prepared")
+        return
 
     await websocket.accept()
 
@@ -70,8 +73,8 @@ async def terminal_ws(websocket: WebSocket, project_id: str):
             term_size=(80, 24),
         )
 
-        # cd into the project directory (home dir is automatic)
-        process.stdin.write(f"cd ~/projects/{project.gitea_repo_name}\n")
+        # cd into the warehouse repo directory
+        process.stdin.write(f"cd ~/projects/{WAREHOUSE_REPO}\n")
 
         # Task: SSH stdout → WebSocket
         async def ssh_to_ws():

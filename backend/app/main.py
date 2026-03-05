@@ -17,15 +17,16 @@ from app.config import (
 )
 from app.database import engine, async_session, get_db
 from app.models import Base, Country
-from app.seed import seed_catalog, seed_countries, seed_server_type_rates
+from app.seed import seed_countries, seed_server_type_rates
 from app.auth import router as auth_router, verify_token
 from app.routers.billing import router as billing_router
 from app.routers.catalog import router as catalog_router
 from app.routers.queries import router as queries_router
 from app.routers.settings import router as settings_router
-from app.routers.projects import router as projects_router
 from app.routers.terminal import router as terminal_router
 from app.routers.workers import router as workers_router
+from app.routers.orgs import router as orgs_router
+from app.routers.workspace import router as workspace_router
 from app.routers.dbt import router as dbt_router
 
 
@@ -41,8 +42,6 @@ async def lifespan(app: FastAPI):
         await seed_countries(session)
     async with async_session() as session:
         await seed_server_type_rates(session)
-    async with async_session() as session:
-        await seed_catalog(session)
 
     if GITEA_ADMIN_PASSWORD:
         from app.gitea import bootstrap_token
@@ -82,11 +81,12 @@ app.add_middleware(SessionMiddleware, secret_key=JWT_SECRET)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(catalog_router)
-app.include_router(projects_router)
 app.include_router(queries_router)
 app.include_router(settings_router)
 app.include_router(terminal_router)
 app.include_router(workers_router)
+app.include_router(orgs_router)
+app.include_router(workspace_router)
 app.include_router(dbt_router)
 
 

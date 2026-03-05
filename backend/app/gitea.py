@@ -59,33 +59,73 @@ async def bootstrap_token() -> None:
         logger.info("Gitea API token bootstrapped for user %s", GITEA_ADMIN_USER)
 
 
-# ── Repository operations ────────────────────────────────────────────
+# ── Organization operations ──────────────────────────────────────────
 
 
-async def create_repo(name: str) -> dict:
+async def create_gitea_org(name: str) -> dict:
+    """Create a Gitea organization (idempotent)."""
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            _api("/user/repos"),
+            _api("/orgs"),
             headers=_headers(),
-            json={"name": name, "auto_init": True, "default_branch": "main"},
+            json={"username": name, "visibility": "private"},
         )
+        if resp.status_code == 422:
+            # Org already exists — fetch and return it
+            resp = await client.get(_api(f"/orgs/{name}"), headers=_headers())
+            resp.raise_for_status()
+            return resp.json()
         resp.raise_for_status()
         return resp.json()
 
 
-async def delete_repo(name: str) -> None:
+async def delete_gitea_org(name: str) -> None:
+    """Delete a Gitea organization."""
     async with httpx.AsyncClient() as client:
         resp = await client.delete(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{name}"),
+            _api(f"/orgs/{name}"),
             headers=_headers(),
         )
         resp.raise_for_status()
 
 
-async def list_repos() -> list[dict]:
+# ── Repository operations ────────────────────────────────────────────
+
+
+async def create_repo(name: str, owner: str = GITEA_ADMIN_USER) -> dict:
+    """Create a repo (idempotent). If owner differs from admin user, creates under that org."""
+    if owner == GITEA_ADMIN_USER:
+        url = _api("/user/repos")
+    else:
+        url = _api(f"/orgs/{owner}/repos")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers=_headers(),
+            json={"name": name, "auto_init": True, "default_branch": "main"},
+        )
+        if resp.status_code == 409:
+            # Repo already exists — fetch and return it
+            resp = await client.get(_api(f"/repos/{owner}/{name}"), headers=_headers())
+            resp.raise_for_status()
+            return resp.json()
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def delete_repo(name: str, owner: str = GITEA_ADMIN_USER) -> None:
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            _api(f"/repos/{owner}/{name}"),
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+
+
+async def list_repos(owner: str = GITEA_ADMIN_USER) -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            _api("/user/repos"),
+            _api(f"/orgs/{owner}/repos") if owner != GITEA_ADMIN_USER else _api("/user/repos"),
             headers=_headers(),
         )
         resp.raise_for_status()
@@ -95,11 +135,11 @@ async def list_repos() -> list[dict]:
 # ── File operations ──────────────────────────────────────────────────
 
 
-async def get_file(repo: str, path: str, ref: str = "main") -> str:
+async def get_file(repo: str, path: str, ref: str = "main", owner: str = GITEA_ADMIN_USER) -> str:
     """Return decoded file content."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             params={"ref": ref},
         )
@@ -107,17 +147,44 @@ async def get_file(repo: str, path: str, ref: str = "main") -> str:
         return base64.b64decode(resp.json()["content"]).decode()
 
 
+async def create_files_batch(
+    repo: str, files: dict[str, str], message: str,
+    branch: str = "main", owner: str = GITEA_ADMIN_USER,
+) -> dict:
+    """Create multiple files in a single commit."""
+    payload = {
+        "branch": branch,
+        "message": message,
+        "files": [
+            {
+                "operation": "create",
+                "path": path,
+                "content": base64.b64encode(content.encode()).decode(),
+            }
+            for path, content in files.items()
+        ],
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            _api(f"/repos/{owner}/{repo}/contents"),
+            headers=_headers(),
+            json=payload,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def create_or_update_file(
-    repo: str, path: str, content: str, message: str, branch: str = "main"
+    repo: str, path: str, content: str, message: str,
+    branch: str = "main", owner: str = GITEA_ADMIN_USER,
 ) -> dict:
     """Create or update a file. Fetches SHA automatically for updates."""
     encoded = base64.b64encode(content.encode()).decode()
     payload: dict = {"content": encoded, "message": message, "branch": branch}
 
-    # Check if file exists to decide POST (create) vs PUT (update)
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             params={"ref": branch},
         )
@@ -128,7 +195,7 @@ async def create_or_update_file(
             method = client.post
 
         resp = await method(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             json=payload,
         )
@@ -136,11 +203,13 @@ async def create_or_update_file(
         return resp.json()
 
 
-async def delete_file(repo: str, path: str, message: str, branch: str = "main") -> dict:
+async def delete_file(
+    repo: str, path: str, message: str,
+    branch: str = "main", owner: str = GITEA_ADMIN_USER,
+) -> dict:
     async with httpx.AsyncClient() as client:
-        # Get SHA first
         resp = await client.get(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             params={"ref": branch},
         )
@@ -148,7 +217,7 @@ async def delete_file(repo: str, path: str, message: str, branch: str = "main") 
         sha = resp.json()["sha"]
 
         resp = await client.delete(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             json={"message": message, "sha": sha, "branch": branch},
         )
@@ -156,10 +225,10 @@ async def delete_file(repo: str, path: str, message: str, branch: str = "main") 
         return resp.json()
 
 
-async def list_files(repo: str, path: str = "", ref: str = "main") -> list[dict]:
+async def list_files(repo: str, path: str = "", ref: str = "main", owner: str = GITEA_ADMIN_USER) -> list[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/contents/{path}"),
+            _api(f"/repos/{owner}/{repo}/contents/{path}"),
             headers=_headers(),
             params={"ref": ref},
         )
@@ -170,10 +239,10 @@ async def list_files(repo: str, path: str = "", ref: str = "main") -> list[dict]
 # ── Branch operations ────────────────────────────────────────────────
 
 
-async def create_branch(repo: str, name: str, from_ref: str = "main") -> dict:
+async def create_branch(repo: str, name: str, from_ref: str = "main", owner: str = GITEA_ADMIN_USER) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/branches"),
+            _api(f"/repos/{owner}/{repo}/branches"),
             headers=_headers(),
             json={"new_branch_name": name, "old_branch_name": from_ref},
         )
@@ -185,11 +254,11 @@ async def create_branch(repo: str, name: str, from_ref: str = "main") -> dict:
 
 
 async def create_pull_request(
-    repo: str, title: str, head: str, base: str = "main"
+    repo: str, title: str, head: str, base: str = "main", owner: str = GITEA_ADMIN_USER,
 ) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/pulls"),
+            _api(f"/repos/{owner}/{repo}/pulls"),
             headers=_headers(),
             json={"title": title, "head": head, "base": base},
         )
@@ -197,10 +266,10 @@ async def create_pull_request(
         return resp.json()
 
 
-async def merge_pull_request(repo: str, pr_number: int) -> dict:
+async def merge_pull_request(repo: str, pr_number: int, owner: str = GITEA_ADMIN_USER) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            _api(f"/repos/{GITEA_ADMIN_USER}/{repo}/pulls/{pr_number}/merge"),
+            _api(f"/repos/{owner}/{repo}/pulls/{pr_number}/merge"),
             headers=_headers(),
             json={"Do": "merge"},
         )

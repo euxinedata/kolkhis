@@ -77,12 +77,66 @@ services:
       gitea admin user create --username ${GITEA_ADMIN_USER:-kolkhis-admin} --password ${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026} --email ${GITEA_ADMIN_EMAIL:-admin@kolkhis.local} --admin"
     restart: "no"
 
+  lakekeeper-init:
+    image: postgres:17
+    depends_on:
+      - db
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+    entrypoint: >
+      sh -c "until pg_isready -h db -U ${POSTGRES_USER}; do sleep 1; done &&
+      psql -h db -U ${POSTGRES_USER} -d ${POSTGRES_DB} -tc \"SELECT 1 FROM pg_database WHERE datname = 'lakekeeper'\" | grep -q 1 ||
+      psql -h db -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c \"CREATE DATABASE lakekeeper\""
+    restart: "no"
+
+  lakekeeper-migrate:
+    image: quay.io/lakekeeper/catalog:latest
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=${LAKEKEEPER_PG_ENCRYPTION_KEY:-ThisIsNotSecure}
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/lakekeeper
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/lakekeeper
+    command: ["migrate"]
+    depends_on:
+      lakekeeper-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  lakekeeper:
+    image: quay.io/lakekeeper/catalog:latest
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=${LAKEKEEPER_PG_ENCRYPTION_KEY:-ThisIsNotSecure}
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/lakekeeper
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/lakekeeper
+      - LAKEKEEPER__AUTHZ_BACKEND=allowall
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 5s
+    ports:
+      - "8181:8181"
+    depends_on:
+      lakekeeper-migrate:
+        condition: service_completed_successfully
+
+  lakekeeper-setup:
+    image: curlimages/curl:latest
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    entrypoint: ["sh", "-c", "curl -sf -X POST http://lakekeeper:8181/management/v1/warehouse -H 'Content-Type: application/json' -H 'X-Project-Id: 00000000-0000-0000-0000-000000000000' -d '{\"warehouse-name\":\"warehouse\",\"storage-profile\":{\"type\":\"s3\",\"bucket\":\"warehouse\",\"region\":\"us-east-1\",\"flavor\":\"s3-compat\",\"endpoint\":\"http://minio:9000\",\"path-style-access\":true,\"sts-enabled\":false,\"remote-signing-enabled\":false},\"storage-credential\":{\"type\":\"s3\",\"credential-type\":\"access-key\",\"aws-access-key-id\":\"minioadmin\",\"aws-secret-access-key\":\"minioadmin\"}}' || echo 'Warehouse already exists'"]
+    restart: "no"
+
   shell:
     build: ./shell
     ports:
       - "2222:22"
     volumes:
-      - ./backend/data/homes:/home
+      - ./backend/data/homes/${SHELL_ORG_UUID}:/home
 
   dagster-init:
     image: postgres:17

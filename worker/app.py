@@ -170,6 +170,12 @@ class CreateSessionRequest(BaseModel):
     s3: SessionS3Config
 
 
+class CreateIcebergSessionRequest(BaseModel):
+    lakekeeper_url: str
+    warehouse: str
+    s3: SessionS3Config
+
+
 class SessionQueryRequest(BaseModel):
     sql: str
     fetch_results: bool = True
@@ -189,6 +195,22 @@ async def create_session(req: CreateSessionRequest, _auth: Authenticated):
         None,
         session_manager.create,
         [obj.model_dump() for obj in req.catalog_objects],
+        req.s3.endpoint,
+        req.s3.access_key,
+        req.s3.secret_key,
+        req.s3.region,
+    )
+    return {"session_id": session_id}
+
+
+@app.post("/session/iceberg")
+async def create_iceberg_session(req: CreateIcebergSessionRequest, _auth: Authenticated):
+    loop = asyncio.get_running_loop()
+    session_id = await loop.run_in_executor(
+        None,
+        session_manager.create_iceberg,
+        req.lakekeeper_url,
+        req.warehouse,
         req.s3.endpoint,
         req.s3.access_key,
         req.s3.secret_key,
