@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import httpx
 import s3fs
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, SHELL_MODE
+from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, SHELL_MODE, LAKEKEEPER_URL
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import Organization, OrgMembership, User
@@ -35,14 +36,45 @@ class ApproveMemberRequest(BaseModel):
 
 
 async def _create_org_bucket(org_id: str) -> None:
-    """Create the S3 bucket for an org and initialize the warehouse prefix."""
+    """Create an S3 bucket for the org and register a Lakekeeper warehouse."""
     fs = s3fs.S3FileSystem(
         endpoint_url=S3_ENDPOINT,
         key=S3_ACCESS_KEY,
         secret=S3_SECRET_KEY,
         client_kwargs={"region_name": S3_REGION},
     )
-    await asyncio.to_thread(fs.mkdirs, f"{org_id}/warehouse", exist_ok=True)
+    await asyncio.to_thread(fs.mkdir, org_id)
+
+    # Register warehouse in Lakekeeper
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{LAKEKEEPER_URL}/management/v1/warehouse",
+            headers={
+                "Content-Type": "application/json",
+                "X-Project-Id": "00000000-0000-0000-0000-000000000000",
+            },
+            json={
+                "warehouse-name": org_id,
+                "storage-profile": {
+                    "type": "s3",
+                    "bucket": org_id,
+                    "region": S3_REGION,
+                    "flavor": "s3-compat",
+                    "endpoint": S3_ENDPOINT,
+                    "path-style-access": True,
+                    "sts-enabled": False,
+                    "remote-signing-enabled": False,
+                },
+                "storage-credential": {
+                    "type": "s3",
+                    "credential-type": "access-key",
+                    "aws-access-key-id": S3_ACCESS_KEY,
+                    "aws-secret-access-key": S3_SECRET_KEY,
+                },
+            },
+        )
+        if resp.status_code not in (201, 409):
+            raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
 
 
 # dbt + dagster scaffold for the warehouse monorepo
