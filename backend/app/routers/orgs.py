@@ -67,6 +67,21 @@ test-paths: ["tests"]
       type: duckdb
       path: /dev/null
 """,
+    ".gitignore": """\
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# dbt
+target/
+logs/
+dbt_packages/
+
+# Dagster
+.dagster/
+""",
     "models/.gitkeep": "",
     "macros/.gitkeep": "",
     "seeds/.gitkeep": "",
