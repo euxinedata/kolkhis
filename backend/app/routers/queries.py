@@ -61,7 +61,7 @@ async def create_query(
     job = QueryJob(id=job_id, user_id=int(user["sub"]), sql=body.sql, status="pending")
     db.add(job)
     await db.commit()
-    submit_query(job_id, body.sql, user_id=int(user["sub"]))
+    submit_query(job_id, body.sql, user_id=int(user["sub"]), org_id=user.get("org_id", ""))
     return {"job_id": job_id}
 
 
