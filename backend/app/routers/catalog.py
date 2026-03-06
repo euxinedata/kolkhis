@@ -51,7 +51,34 @@ async def list_schemas(
     org_db = await _get_org_db(db_name, auth, db)
     catalog = get_database_catalog(org_db.lakekeeper_warehouse)
     namespaces = catalog.list_namespaces()
-    return [{"name": ns[0]} for ns in namespaces]
+    total_size = 0
+    total_tables = 0
+    last_updated_ms = None
+    schemas = []
+    for ns in namespaces:
+        ns_name = ns[0]
+        tables = catalog.list_tables(ns_name)
+        ns_size = 0
+        ns_table_count = len(tables)
+        for t in tables:
+            tbl = catalog.load_table(f"{ns_name}.{t[-1]}")
+            snapshot = tbl.current_snapshot()
+            if snapshot:
+                if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
+                    last_updated_ms = snapshot.timestamp_ms
+                if snapshot.summary:
+                    size = snapshot.summary.get("total-files-size")
+                    if size is not None:
+                        ns_size += int(size)
+        total_size += ns_size
+        total_tables += ns_table_count
+        schemas.append({"name": ns_name, "tables": ns_table_count, "file_size": ns_size})
+    return {
+        "schemas": schemas,
+        "total_size": total_size,
+        "total_tables": total_tables,
+        "last_updated_ms": last_updated_ms,
+    }
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects")
@@ -64,7 +91,24 @@ async def list_objects(
     org_db = await _get_org_db(db_name, auth, db)
     catalog = get_database_catalog(org_db.lakekeeper_warehouse)
     tables = catalog.list_tables(schema_name)
-    return [{"name": t[-1], "type": "table"} for t in tables]
+    result = []
+    total_size = 0
+    last_updated_ms = None
+    for t in tables:
+        tbl = catalog.load_table(f"{schema_name}.{t[-1]}")
+        col_count = len(tbl.schema().fields)
+        file_size = None
+        snapshot = tbl.current_snapshot()
+        if snapshot:
+            if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
+                last_updated_ms = snapshot.timestamp_ms
+            if snapshot.summary:
+                size = snapshot.summary.get("total-files-size")
+                if size is not None:
+                    file_size = int(size)
+                    total_size += file_size
+        result.append({"name": t[-1], "type": "table", "columns": col_count, "file_size": file_size})
+    return {"objects": result, "total_size": total_size, "last_updated_ms": last_updated_ms}
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects/{obj_name}/schema")
@@ -81,8 +125,63 @@ async def get_object_schema(
         tbl = catalog.load_table(f"{schema_name}.{obj_name}")
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    row_count = None
+    total_file_size = None
+    total_data_files = None
+    last_updated_ms = None
+    snapshot = tbl.current_snapshot()
+    if snapshot:
+        last_updated_ms = snapshot.timestamp_ms
+        if snapshot.summary:
+            total = snapshot.summary.get("total-records")
+            if total is not None:
+                row_count = int(total)
+            size = snapshot.summary.get("total-files-size")
+            if size is not None:
+                total_file_size = int(size)
+            files = snapshot.summary.get("total-data-files")
+            if files is not None:
+                total_data_files = int(files)
+
+    # Partition info
+    spec = tbl.spec()
+    partition_fields = None
+    if not spec.is_unpartitioned():
+        schema = tbl.schema()
+        partition_fields = []
+        for pf in spec.fields:
+            source_field = schema.find_field(pf.source_id)
+            partition_fields.append({
+                "name": source_field.name,
+                "transform": str(pf.transform),
+            })
+
+    # Recent snapshots (last 10)
+    snapshots = []
+    for snap in reversed(tbl.snapshots()[-10:]):
+        entry = {
+            "snapshot_id": snap.snapshot_id,
+            "timestamp_ms": snap.timestamp_ms,
+        }
+        if snap.summary:
+            entry["operation"] = str(snap.summary.operation.value)
+            added = snap.summary.get("added-records")
+            if added is not None:
+                entry["added_records"] = int(added)
+            deleted = snap.summary.get("deleted-records")
+            if deleted is not None:
+                entry["deleted_records"] = int(deleted)
+        snapshots.append(entry)
+
     return {
         "type": "table",
+        "row_count": row_count,
+        "total_file_size": total_file_size,
+        "total_data_files": total_data_files,
+        "last_updated_ms": last_updated_ms,
+        "partition_fields": partition_fields,
+        "snapshots": snapshots,
         "columns": [
             {
                 "name": field.name,

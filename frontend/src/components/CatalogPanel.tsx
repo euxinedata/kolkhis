@@ -84,9 +84,10 @@ class CatalogTreeDataProvider implements TreeDataProvider<CatalogEntry> {
   async loadSchemas(db: string): Promise<void> {
     const existing = this.items[db]
     if (existing?.children && existing.children.length > 0) return
-    const schemas = await apiFetch<{ name: string }[]>(
+    const data = await apiFetch<{ schemas: { name: string }[] }>(
       `/api/catalog/databases/${db}/schemas`
     )
+    const schemas = data.schemas
     for (const s of schemas) {
       const id = `${db}.${s.name}`
       this.items[id] = {
@@ -107,9 +108,10 @@ class CatalogTreeDataProvider implements TreeDataProvider<CatalogEntry> {
     const parentId = `${db}.${schema}`
     const existing = this.items[parentId]
     if (existing?.children && existing.children.length > 0) return
-    const objects = await apiFetch<{ name: string; type: string }[]>(
+    const data = await apiFetch<{ objects: { name: string; type: string }[] }>(
       `/api/catalog/databases/${db}/schemas/${schema}/objects`
     )
+    const objects = data.objects
     for (const obj of objects) {
       const id = `${db}.${schema}.${obj.name}`
       this.items[id] = {

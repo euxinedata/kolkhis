@@ -1,11 +1,17 @@
-"""Generate synthetic retail data for stress-testing the Kolkhis SQL editor.
+"""Generate synthetic retail data for an org's Iceberg lakehouse.
 
-Creates ~5.3B rows across 3 databases, 6 schemas, and 17 tables modelling
-a multi-national retail chain with offline and online stores.
+Creates 3 databases with 2 schemas each, totalling 17 tables:
+  - retail_catalog: products, pricing
+  - retail_ops: stores, inventory
+  - retail_sales: transactions, customers
+
+Each database becomes a separate Lakekeeper warehouse ({org_id}-{db_name}).
+The script provisions everything: Lakekeeper warehouses, OrgDatabase records,
+namespaces, and table data.
 
 Usage:
-    python -m scripts.generate_retail_data          # from backend/
-    python scripts/generate_retail_data.py          # also works
+    cd backend/
+    python scripts/generate_retail_data.py <org_uuid>
 """
 
 import io
@@ -16,13 +22,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import httpx
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from faker import Faker
+from pyiceberg.catalog.rest import RestCatalog
+from sqlalchemy import create_engine, text
 
-from app.config import WAREHOUSE_PATH
-from app.warehouse import catalog
+from app.config import (
+    DATABASE_URL_SYNC,
+    LAKEKEEPER_URL,
+    S3_ACCESS_KEY,
+    S3_BUCKET_NAME,
+    S3_ENDPOINT,
+    S3_INTERNAL_ENDPOINT,
+    S3_REGION,
+    S3_SECRET_KEY,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -33,14 +50,11 @@ CHUNK_SIZE = 2_000_000                       # rows per generation chunk
 TARGET_DISK_SIZE = 512 * 1024 * 1024         # 512 MB Parquet files on disk
 BIN_PACKER_BYPASS = 10 * 1024 * 1024 * 1024  # 10 GB — prevents bin-packer from splitting
 
-# Namespace mapping: database.schema (hierarchical Iceberg namespaces)
-NAMESPACES = {
-    "retail_catalog.products": "retail_catalog.products",
-    "retail_catalog.pricing": "retail_catalog.pricing",
-    "retail_ops.stores": "retail_ops.stores",
-    "retail_ops.inventory": "retail_ops.inventory",
-    "retail_sales.transactions": "retail_sales.transactions",
-    "retail_sales.customers": "retail_sales.customers",
+# Database → schemas mapping
+DATABASES = {
+    "retail_catalog": ["products", "pricing"],
+    "retail_ops": ["stores", "inventory"],
+    "retail_sales": ["transactions", "customers"],
 }
 
 # Row counts
@@ -133,7 +147,7 @@ fake = Faker()
 Faker.seed(SEED)
 rng = np.random.default_rng(SEED)
 
-# Pre-build name/city/domain pools for fast vectorized sampling (avoids faker per-row)
+# Pre-build name/city/domain pools for fast vectorized sampling
 _FIRST_NAMES = [fake.first_name() for _ in range(5_000)]
 _LAST_NAMES = [fake.last_name() for _ in range(5_000)]
 _CITIES = [fake.city() for _ in range(2_000)]
@@ -146,6 +160,83 @@ _DOMAINS_ARR = np.array(_DOMAINS)
 
 
 # ---------------------------------------------------------------------------
+# Provisioning helpers
+# ---------------------------------------------------------------------------
+
+
+def create_lakekeeper_warehouse(org_id: str, db_name: str) -> str:
+    """Create a Lakekeeper warehouse for an org database. Returns the warehouse name."""
+    warehouse_name = f"{org_id}-{db_name}"
+    resp = httpx.post(
+        f"{LAKEKEEPER_URL}/management/v1/warehouse",
+        headers={
+            "Content-Type": "application/json",
+            "X-Project-Id": "00000000-0000-0000-0000-000000000000",
+        },
+        json={
+            "warehouse-name": warehouse_name,
+            "storage-profile": {
+                "type": "s3",
+                "bucket": S3_BUCKET_NAME,
+                "key-prefix": f"{org_id}/{db_name}",
+                "region": S3_REGION,
+                "flavor": "s3-compat",
+                "endpoint": S3_INTERNAL_ENDPOINT,
+                "path-style-access": True,
+                "sts-enabled": False,
+                "remote-signing-enabled": False,
+            },
+            "storage-credential": {
+                "type": "s3",
+                "credential-type": "access-key",
+                "aws-access-key-id": S3_ACCESS_KEY,
+                "aws-secret-access-key": S3_SECRET_KEY,
+            },
+        },
+        timeout=30,
+    )
+    if resp.status_code in (201, 409):
+        return warehouse_name
+    if resp.status_code == 400 and "StorageProfileOverlap" in resp.text:
+        print(f"  Warehouse {warehouse_name} already exists (storage overlap), reusing")
+        return warehouse_name
+    raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
+
+
+def insert_org_database(engine, org_id: str, db_name: str, warehouse_name: str):
+    """Insert an OrgDatabase record if it doesn't exist."""
+    with engine.connect() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM org_databases WHERE org_id = :org_id AND name = :name"),
+            {"org_id": org_id, "name": db_name},
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                text("INSERT INTO org_databases (org_id, name, lakekeeper_warehouse) VALUES (:org_id, :name, :wh)"),
+                {"org_id": org_id, "name": db_name, "wh": warehouse_name},
+            )
+            conn.commit()
+            print(f"  Inserted OrgDatabase: {db_name} -> {warehouse_name}")
+        else:
+            print(f"  OrgDatabase {db_name} already exists")
+
+
+def get_catalog(warehouse_name: str) -> RestCatalog:
+    """Create a PyIceberg RestCatalog for a specific Lakekeeper warehouse."""
+    return RestCatalog(
+        f"gen-{warehouse_name}",
+        uri=f"{LAKEKEEPER_URL}/catalog",
+        warehouse=warehouse_name,
+        **{
+            "s3.endpoint": S3_ENDPOINT,
+            "s3.access-key-id": S3_ACCESS_KEY,
+            "s3.secret-access-key": S3_SECRET_KEY,
+            "s3.region": S3_REGION,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -155,20 +246,19 @@ def elapsed(start: float) -> str:
 
 
 def calibrate_parquet_bytes_per_row(sample: pa.Table) -> float:
-    """Write a sample to an in-memory buffer to measure actual Parquet bytes/row."""
     buf = io.BytesIO()
     pq.write_table(sample, buf, compression='zstd')
     return len(buf.getvalue()) / sample.num_rows
 
 
-def ensure_namespace(ns: str):
+def ensure_namespace(catalog: RestCatalog, ns: str):
     existing = {".".join(t) for t in catalog.list_namespaces()}
     if ns not in existing:
-        catalog.create_namespace(ns, properties={"location": f"{WAREHOUSE_PATH}/{ns.replace('.', '/')}"})
+        catalog.create_namespace(ns)
         print(f"  Created namespace {ns}")
 
 
-def create_table(ns: str, name: str, schema: pa.Schema):
+def create_table(catalog: RestCatalog, ns: str, name: str, schema: pa.Schema):
     full = f"{ns}.{name}"
     existing = {t[-1] for t in catalog.list_tables(ns)}
     if name in existing:
@@ -180,7 +270,6 @@ def create_table(ns: str, name: str, schema: pa.Schema):
 
 
 def random_dates(start: date, end: date, n: int) -> pa.Array:
-    """Generate n random dates between start and end as pa.date32()."""
     days = (end - start).days
     offsets = rng.integers(0, days + 1, size=n)
     epoch = date(1970, 1, 1)
@@ -189,7 +278,6 @@ def random_dates(start: date, end: date, n: int) -> pa.Array:
 
 
 def random_timestamps(start: date, end: date, n: int) -> pa.Array:
-    """Generate n random timestamps between start and end."""
     start_ts = int(datetime(start.year, start.month, start.day).timestamp())
     end_ts = int(datetime(end.year, end.month, end.day, 23, 59, 59).timestamp())
     ts = rng.integers(start_ts, end_ts + 1, size=n)
@@ -202,37 +290,30 @@ def random_timestamps(start: date, end: date, n: int) -> pa.Array:
 
 
 def gen_categories() -> pa.Table:
-    """Generate 3-level category hierarchy."""
     ids, names, parents = [], [], []
     cat_id = 0
-
     for dept, categories in DEPT_TREE.items():
         cat_id += 1
         dept_id = cat_id
         ids.append(dept_id)
         names.append(dept)
         parents.append(None)
-
         for cat, subcats in categories.items():
             cat_id += 1
             mid_id = cat_id
             ids.append(mid_id)
             names.append(cat)
             parents.append(dept_id)
-
             for sub in subcats:
                 cat_id += 1
                 ids.append(cat_id)
                 names.append(sub)
                 parents.append(mid_id)
-
-    # Pad to N_CATEGORIES if needed
     while len(ids) < N_CATEGORIES:
         cat_id += 1
         ids.append(cat_id)
         names.append(f"Category_{cat_id}")
         parents.append(rng.integers(1, len(ids)))
-
     return pa.table({
         "category_id": pa.array(ids[:N_CATEGORIES], type=pa.int32()),
         "name": pa.array(names[:N_CATEGORIES], type=pa.string()),
@@ -273,7 +354,6 @@ def gen_products() -> pa.Table:
     weights = np.round(rng.uniform(0.01, 50.0, size=N_PRODUCTS), 2).astype(np.float32)
     units = rng.choice(["each", "kg", "liter", "pack"], N_PRODUCTS).tolist()
     created = random_timestamps(date(2020, 1, 1), date(2024, 12, 31), N_PRODUCTS)
-
     return pa.table({
         "product_id": pa.array(np.arange(1, N_PRODUCTS + 1, dtype=np.int32)),
         "sku": pa.array(skus, type=pa.string()),
@@ -292,7 +372,6 @@ def gen_price_lists() -> pa.Table:
     currencies = rng.choice(CURRENCIES, N_PRICE_LISTS).tolist()
     prices = np.round(rng.uniform(0.99, 999.99, size=N_PRICE_LISTS), 2).astype(np.float64)
     valid_from = random_dates(date(2022, 1, 1), date(2025, 6, 30), N_PRICE_LISTS)
-    # valid_to is 90-365 days after valid_from
     from_days = valid_from.to_pylist()
     offsets = rng.integers(90, 366, size=N_PRICE_LISTS)
     valid_to_list = [(d + timedelta(days=int(o)) if d else None)
@@ -351,7 +430,6 @@ def gen_regions() -> pa.Table:
 def gen_stores() -> pa.Table:
     names = [f"Store {fake.city()} #{i}" for i in range(1, N_STORES + 1)]
     region_ids = rng.integers(1, N_REGIONS + 1, size=N_STORES, dtype=np.int32)
-    # 400 offline, 100 online
     types = (["offline"] * 400 + ["online"] * 100)[:N_STORES]
     rng.shuffle(types)
     addresses = [fake.street_address() for _ in range(N_STORES)]
@@ -360,7 +438,6 @@ def gen_stores() -> pa.Table:
     lats = np.round(rng.uniform(-60, 70, size=N_STORES), 6).astype(np.float64)
     lons = np.round(rng.uniform(-180, 180, size=N_STORES), 6).astype(np.float64)
     opened = random_dates(date(2010, 1, 1), date(2024, 12, 31), N_STORES)
-    # ~5% closed
     closed_list = []
     opened_list = opened.to_pylist()
     for i in range(N_STORES):
@@ -370,7 +447,6 @@ def gen_stores() -> pa.Table:
             )
         else:
             closed_list.append(None)
-
     return pa.table({
         "store_id": pa.array(np.arange(1, N_STORES + 1, dtype=np.int32)),
         "name": pa.array(names, type=pa.string()),
@@ -430,12 +506,10 @@ def gen_replenishment_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     status_choices = np.array(["pending", "shipped", "received", "cancelled"])
     statuses = status_choices[rng.integers(0, 4, size=n)]
     ordered = random_timestamps(date(2022, 1, 1), date(2025, 12, 31), n)
-    # Vectorized received_at: ordered + 1-29 days, only for "received" status
-    ordered_us = ordered.to_numpy().astype(np.int64)  # microseconds
+    ordered_us = ordered.to_numpy().astype(np.int64)
     day_offsets_us = rng.integers(1, 30, size=n).astype(np.int64) * 86_400_000_000
     received_us = ordered_us + day_offsets_us
     is_received = (statuses == "received")
-    # Build received array: valid timestamps for received, null for others
     received_arr = pa.array(
         np.where(is_received, received_us, 0).astype(np.int64),
         type=pa.timestamp("us"),
@@ -460,7 +534,6 @@ def gen_customers_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     last = _LAST_NAMES_ARR[rng.integers(0, len(_LAST_NAMES_ARR), size=n)]
     domains = _DOMAINS_ARR[rng.integers(0, len(_DOMAINS_ARR), size=n)]
     emails = np.char.add(np.char.add(np.array([f"user{i}" for i in ids]), "@"), domains)
-    # Phone as numeric string: fast
     phones = np.array([f"+1-{d:010d}" for d in rng.integers(1_000_000_000, 9_999_999_999, size=n)])
     countries = rng.choice(COUNTRIES, n)
     cities = _CITIES_ARR[rng.integers(0, len(_CITIES_ARR), size=n)]
@@ -480,7 +553,6 @@ def gen_customers_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 def gen_loyalty_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     n = min(chunk_size, N_LOYALTY - chunk_start)
     ids = np.arange(chunk_start + 1, chunk_start + n + 1, dtype=np.int32)
-    # Customer IDs: first N_LOYALTY customers get loyalty
     customer_ids = np.arange(chunk_start + 1, chunk_start + n + 1, dtype=np.int32)
     _tiers_arr = np.array(LOYALTY_TIERS)
     tiers = _tiers_arr[rng.choice(4, size=n, p=[0.4, 0.3, 0.2, 0.1])]
@@ -525,7 +597,6 @@ def gen_orders_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 def gen_order_lines_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     n = min(chunk_size, N_ORDER_LINES - chunk_start)
     ids = np.arange(chunk_start + 1, chunk_start + n + 1, dtype=np.int64)
-    # Distribute across orders: ~3 lines per order
     order_ids = rng.integers(1, N_ORDERS + 1, size=n, dtype=np.int64)
     product_ids = rng.integers(1, N_PRODUCTS + 1, size=n, dtype=np.int32)
     qty = rng.integers(1, 10, size=n, dtype=np.int32)
@@ -533,7 +604,6 @@ def gen_order_lines_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     discounts = np.round(rng.uniform(0, 50.0, size=n) * (rng.random(n) < 0.3), 2
                          ).astype(np.float64)
     line_totals = np.round(qty * unit_prices - discounts, 2).astype(np.float64)
-    # Ensure no negative totals
     line_totals = np.maximum(line_totals, 0.0)
     return pa.table({
         "order_line_id": pa.array(ids),
@@ -549,9 +619,7 @@ def gen_order_lines_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 def gen_payments_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
     n = min(chunk_size, N_PAYMENTS - chunk_start)
     ids = np.arange(chunk_start + 1, chunk_start + n + 1, dtype=np.int64)
-    # 1:1 with orders
     order_ids = np.arange(chunk_start + 1, chunk_start + n + 1, dtype=np.int64)
-    # Weighted: 20% cash, 60% card, 20% mobile
     method_idx = rng.choice(3, size=n, p=[0.2, 0.6, 0.2])
     methods = _PAYMENT_METHODS_ARR[method_idx]
     amounts = np.round(rng.uniform(5.0, 2000.0, size=n), 2).astype(np.float64)
@@ -572,11 +640,8 @@ def gen_payments_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 # ---------------------------------------------------------------------------
 
 
-def write_chunked(ns: str, table_name: str, total: int, gen_fn, schema: pa.Schema):
-    """Generate and write a large table, targeting ~512 MB Parquet files on disk."""
+def write_chunked(catalog: RestCatalog, ns: str, table_name: str, total: int, gen_fn, schema: pa.Schema):
     t0 = time.time()
-
-    # 1. Generate first chunk and calibrate compression
     first_chunk = gen_fn(0, CHUNK_SIZE)
     generated = first_chunk.num_rows
     bytes_per_row = calibrate_parquet_bytes_per_row(first_chunk)
@@ -585,24 +650,20 @@ def write_chunked(ns: str, table_name: str, total: int, gen_fn, schema: pa.Schem
     print(f"    Calibration: {bytes_per_row:.1f} disk bytes/row, "
           f"target {target_rows:,} rows/file, ~{est_mem_mb} MB memory/flush")
 
-    # 2. Create Iceberg table (bin-packer bypass ensures one file per append)
-    iceberg_table = create_table(ns, table_name, schema)
+    iceberg_table = create_table(catalog, ns, table_name, schema)
 
-    # 3. Accumulate and flush loop
     written = 0
     pending: list[pa.Table] = [first_chunk]
     pending_rows = first_chunk.num_rows
     calibrated = False
 
     while True:
-        # Generate more chunks until we have enough for a file (or exhaust total)
         while pending_rows < target_rows and generated < total:
             chunk = gen_fn(generated, CHUNK_SIZE)
             generated += chunk.num_rows
             pending.append(chunk)
             pending_rows += chunk.num_rows
 
-        # Flush: concat, free pending list, then append
         combined = pa.concat_tables(pending)
         pending = []
         pending_rows = 0
@@ -610,7 +671,6 @@ def write_chunked(ns: str, table_name: str, total: int, gen_fn, schema: pa.Schem
         written += combined.num_rows
         del combined
 
-        # Refine calibration after first real write
         if not calibrated:
             files = iceberg_table.inspect.data_files().to_pylist()
             if files:
@@ -632,187 +692,182 @@ def write_chunked(ns: str, table_name: str, total: int, gen_fn, schema: pa.Schem
     print(f"  Done: {table_name} — {written:,} rows in {elapsed(t0)}")
 
 
-def verify_file_sizes():
-    """Log file sizes for all tables and warn if non-final files deviate from target."""
-    print(f"\n{'=' * 60}")
-    print("File size verification")
-    print(f"{'=' * 60}")
-    target_mb = TARGET_DISK_SIZE / 1024 / 1024
-    for ns in NAMESPACES.values():
-        try:
-            tables = catalog.list_tables(ns)
-        except Exception:
-            continue
-        for tbl_id in tables:
-            tbl_name = tbl_id[-1]
-            full = f"{ns}.{tbl_name}"
-            try:
-                tbl = catalog.load_table(full)
-                files = tbl.inspect.data_files().to_pylist()
-            except Exception:
-                continue
-            if not files:
-                continue
-            sizes = [f["file_size_in_bytes"] for f in files]
-            avg_mb = sum(sizes) / len(sizes) / 1024 / 1024
-            min_mb = min(sizes) / 1024 / 1024
-            max_mb = max(sizes) / 1024 / 1024
-            print(f"\n  {full}: {len(sizes)} file(s), "
-                  f"avg {avg_mb:.1f} MB, min {min_mb:.1f} MB, max {max_mb:.1f} MB")
-            # Warn if any non-final file is outside 80-120% of target
-            if len(sizes) > 1:
-                non_final = sorted(sizes, reverse=True)[:-1]  # exclude smallest (likely last)
-                for i, s in enumerate(non_final):
-                    s_mb = s / 1024 / 1024
-                    if s_mb < target_mb * 0.8 or s_mb > target_mb * 1.2:
-                        print(f"    WARNING: file {i} is {s_mb:.1f} MB "
-                              f"(outside 80-120% of {target_mb:.0f} MB target)")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main():
+    skip_billions = "--skip-billions" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) != 1:
+        print("Usage: python scripts/generate_retail_data.py <org_uuid> [--skip-billions]")
+        sys.exit(1)
+
+    org_id = args[0]
     t_start = time.time()
+
     print("=" * 60)
-    print("Generating synthetic retail data")
+    print(f"Generating retail data for org {org_id}")
     print("=" * 60)
 
-    # Ensure all namespaces exist
-    print("\nCreating namespaces...")
-    for ns in NAMESPACES.values():
-        ensure_namespace(ns)
+    # Verify org exists
+    engine = create_engine(DATABASE_URL_SYNC)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM organizations WHERE id = :id"),
+            {"id": org_id},
+        ).fetchone()
+        if not row:
+            print(f"ERROR: Organization {org_id} not found")
+            sys.exit(1)
+
+    # Provision databases
+    catalogs: dict[str, RestCatalog] = {}
+    for db_name, schemas in DATABASES.items():
+        print(f"\nProvisioning database: {db_name}")
+        warehouse_name = create_lakekeeper_warehouse(org_id, db_name)
+        insert_org_database(engine, org_id, db_name, warehouse_name)
+        cat = get_catalog(warehouse_name)
+        catalogs[db_name] = cat
+        for schema in schemas:
+            ensure_namespace(cat, schema)
 
     # -----------------------------------------------------------------------
     # retail_catalog.products
     # -----------------------------------------------------------------------
-    ns = "retail_catalog.products"
-    print(f"\n--- {ns} ---")
+    cat = catalogs["retail_catalog"]
+    ns = "products"
+    print(f"\n--- retail_catalog.products ---")
 
     t = time.time()
     tbl = gen_categories()
-    it = create_table(ns, "categories", tbl.schema)
+    it = create_table(cat, ns, "categories", tbl.schema)
     it.append(tbl)
     print(f"  categories: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_brands()
-    it = create_table(ns, "brands", tbl.schema)
+    it = create_table(cat, ns, "brands", tbl.schema)
     it.append(tbl)
     print(f"  brands: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_suppliers()
-    it = create_table(ns, "suppliers", tbl.schema)
+    it = create_table(cat, ns, "suppliers", tbl.schema)
     it.append(tbl)
     print(f"  suppliers: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_products()
-    it = create_table(ns, "products", tbl.schema)
+    it = create_table(cat, ns, "products", tbl.schema)
     it.append(tbl)
     print(f"  products: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_catalog.pricing
     # -----------------------------------------------------------------------
-    ns = "retail_catalog.pricing"
-    print(f"\n--- {ns} ---")
+    ns = "pricing"
+    print(f"\n--- retail_catalog.pricing ---")
 
     t = time.time()
     tbl = gen_price_lists()
-    it = create_table(ns, "price_lists", tbl.schema)
+    it = create_table(cat, ns, "price_lists", tbl.schema)
     it.append(tbl)
     print(f"  price_lists: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_promotions()
-    it = create_table(ns, "promotions", tbl.schema)
+    it = create_table(cat, ns, "promotions", tbl.schema)
     it.append(tbl)
     print(f"  promotions: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_promotion_products()
-    it = create_table(ns, "promotion_products", tbl.schema)
+    it = create_table(cat, ns, "promotion_products", tbl.schema)
     it.append(tbl)
     print(f"  promotion_products: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_ops.stores
     # -----------------------------------------------------------------------
-    ns = "retail_ops.stores"
-    print(f"\n--- {ns} ---")
+    cat = catalogs["retail_ops"]
+    ns = "stores"
+    print(f"\n--- retail_ops.stores ---")
 
     t = time.time()
     tbl = gen_regions()
-    it = create_table(ns, "regions", tbl.schema)
+    it = create_table(cat, ns, "regions", tbl.schema)
     it.append(tbl)
     print(f"  regions: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_stores()
-    it = create_table(ns, "stores", tbl.schema)
+    it = create_table(cat, ns, "stores", tbl.schema)
     it.append(tbl)
     print(f"  stores: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     t = time.time()
     tbl = gen_employees()
-    it = create_table(ns, "employees", tbl.schema)
+    it = create_table(cat, ns, "employees", tbl.schema)
     it.append(tbl)
     print(f"  employees: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_ops.inventory (chunked — large tables)
     # -----------------------------------------------------------------------
-    ns = "retail_ops.inventory"
-    print(f"\n--- {ns} ---")
+    ns = "inventory"
+    print(f"\n--- retail_ops.inventory ---")
 
-    # Get schema from a small sample
     sample = gen_stock_levels_chunk(0, 1)
-    write_chunked(ns, "stock_levels", N_STOCK_LEVELS, gen_stock_levels_chunk,
-                  sample.schema)
+    write_chunked(cat, ns, "stock_levels", N_STOCK_LEVELS,
+                  gen_stock_levels_chunk, sample.schema)
 
     sample = gen_replenishment_chunk(0, 1)
-    write_chunked(ns, "replenishment_orders", N_REPLENISHMENT,
+    write_chunked(cat, ns, "replenishment_orders", N_REPLENISHMENT,
                   gen_replenishment_chunk, sample.schema)
 
     # -----------------------------------------------------------------------
     # retail_sales.customers
     # -----------------------------------------------------------------------
-    ns = "retail_sales.customers"
-    print(f"\n--- {ns} ---")
+    cat = catalogs["retail_sales"]
+    ns = "customers"
+    print(f"\n--- retail_sales.customers ---")
 
     sample = gen_customers_chunk(0, 1)
-    write_chunked(ns, "customers", N_CUSTOMERS, gen_customers_chunk, sample.schema)
+    write_chunked(cat, ns, "customers", N_CUSTOMERS,
+                  gen_customers_chunk, sample.schema)
 
     sample = gen_loyalty_chunk(0, 1)
-    write_chunked(ns, "loyalty_accounts", N_LOYALTY, gen_loyalty_chunk, sample.schema)
+    write_chunked(cat, ns, "loyalty_accounts", N_LOYALTY,
+                  gen_loyalty_chunk, sample.schema)
 
     # -----------------------------------------------------------------------
     # retail_sales.transactions (chunked — very large tables)
     # -----------------------------------------------------------------------
-    ns = "retail_sales.transactions"
-    print(f"\n--- {ns} ---")
+    ns = "transactions"
+    if skip_billions:
+        print(f"\n--- retail_sales.transactions --- SKIPPED (--skip-billions)")
+    else:
+        print(f"\n--- retail_sales.transactions ---")
 
-    sample = gen_orders_chunk(0, 1)
-    write_chunked(ns, "orders", N_ORDERS, gen_orders_chunk, sample.schema)
+        sample = gen_orders_chunk(0, 1)
+        write_chunked(cat, ns, "orders", N_ORDERS,
+                      gen_orders_chunk, sample.schema)
 
-    sample = gen_order_lines_chunk(0, 1)
-    write_chunked(ns, "order_lines", N_ORDER_LINES, gen_order_lines_chunk,
-                  sample.schema)
+        sample = gen_order_lines_chunk(0, 1)
+        write_chunked(cat, ns, "order_lines", N_ORDER_LINES,
+                      gen_order_lines_chunk, sample.schema)
 
-    sample = gen_payments_chunk(0, 1)
-    write_chunked(ns, "payments", N_PAYMENTS, gen_payments_chunk, sample.schema)
+        sample = gen_payments_chunk(0, 1)
+        write_chunked(cat, ns, "payments", N_PAYMENTS,
+                      gen_payments_chunk, sample.schema)
 
     # -----------------------------------------------------------------------
-    verify_file_sizes()
-
     print(f"\n{'=' * 60}")
     print(f"All done in {elapsed(t_start)}")
     print(f"{'=' * 60}")
-    print("\nRestart the backend to register tables in the catalog.")
+    print("\nRestart the backend to pick up the new databases.")
 
 
 if __name__ == "__main__":

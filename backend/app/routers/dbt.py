@@ -140,7 +140,7 @@ async def session_query(
     worker_url = existing["worker_url"]
 
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=3600) as client:
             resp = await client.post(
                 f"{worker_url}/session/{session_id}/query",
                 json={"sql": body.sql, "fetch_results": body.fetch_results},

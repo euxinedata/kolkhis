@@ -3,6 +3,12 @@
 Two tables due to schema change in July 2016:
   - nyc.yellow_trips_legacy (2009-01 through 2016-06): lat/lon columns
   - nyc.yellow_trips (2016-07 onwards): location ID columns
+
+Creates a 'nyc_taxi' database in the org's lakehouse if it doesn't exist.
+
+Usage:
+    cd backend/
+    python scripts/load_taxi_data.py <org_uuid>
 """
 import glob
 import sys
@@ -12,25 +18,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from app.warehouse import catalog
+from sqlalchemy import create_engine, text
+
+from app.config import DATABASE_URL_SYNC
+from scripts.generate_retail_data import (
+    create_lakekeeper_warehouse,
+    ensure_namespace,
+    get_catalog,
+    insert_org_database,
+)
 
 DATA_DIR = "/tmp/kolkhis-data"
+DB_NAME = "nyc_taxi"
 NAMESPACE = "nyc"
 
 # Schema cutover: 2016-07 switched from lat/lon to PULocationID/DOLocationID
 CUTOVER = "2016-07"
 
 
-def ensure_namespace():
-    existing = [ns[0] for ns in catalog.list_namespaces()]
-    if NAMESPACE not in existing:
-        print(f"Creating namespace '{NAMESPACE}'")
-        catalog.create_namespace(NAMESPACE)
-
-
-def create_or_get_table(table_name: str, schema: pa.Schema):
+def create_or_get_table(catalog, table_name: str, schema: pa.Schema):
     full_name = f"{NAMESPACE}.{table_name}"
-    existing = [t[1] for t in catalog.list_tables(NAMESPACE)]
+    existing = [t[-1] for t in catalog.list_tables(NAMESPACE)]
     if table_name in existing:
         print(f"  Table '{full_name}' exists, will append")
         return catalog.load_table(full_name)
@@ -40,18 +48,15 @@ def create_or_get_table(table_name: str, schema: pa.Schema):
 
 
 def get_file_month(filepath: str) -> str:
-    """Extract YYYY-MM from filename like yellow_tripdata_2024-01.parquet."""
     name = Path(filepath).stem
     return name.split("_")[-1]
 
 
 def _find_canonical_schema(files: list[str]) -> pa.Schema:
-    """Find a schema with no null-typed columns (prefer later files)."""
     for f in reversed(files):
         schema = pq.read_schema(f)
         if not any(field.type == pa.null() for field in schema):
             return schema
-    # Fallback: use last file's schema but replace null types with double
     schema = pq.read_schema(files[-1])
     fields = []
     for field in schema:
@@ -62,7 +67,7 @@ def _find_canonical_schema(files: list[str]) -> pa.Schema:
     return pa.schema(fields)
 
 
-def load_files(files: list[str], table_name: str):
+def load_files(catalog, files: list[str], table_name: str):
     if not files:
         print(f"No files for {table_name}, skipping")
         return
@@ -71,7 +76,7 @@ def load_files(files: list[str], table_name: str):
     print(f"\nLoading {len(files)} files into {NAMESPACE}.{table_name}")
 
     canonical_schema = _find_canonical_schema(files)
-    iceberg_table = create_or_get_table(table_name, canonical_schema)
+    iceberg_table = create_or_get_table(catalog, table_name, canonical_schema)
 
     total_rows = 0
     for i, filepath in enumerate(files):
@@ -79,7 +84,6 @@ def load_files(files: list[str], table_name: str):
         try:
             table = pq.read_table(filepath)
 
-            # Align schema: cast to match the Iceberg table schema if needed
             target_schema = iceberg_table.schema().as_arrow()
             if table.schema != target_schema:
                 aligned_columns = []
@@ -87,7 +91,6 @@ def load_files(files: list[str], table_name: str):
                     if field.name in table.column_names:
                         col = table.column(field.name)
                         if col.type == pa.null() or col.type != field.type:
-                            # null-typed or mismatched: replace with nulls of target type
                             if col.type == pa.null():
                                 col = pa.nulls(len(table), type=field.type)
                             else:
@@ -109,7 +112,29 @@ def load_files(files: list[str], table_name: str):
 
 
 def main():
-    ensure_namespace()
+    if len(sys.argv) != 2:
+        print("Usage: python scripts/load_taxi_data.py <org_uuid>")
+        sys.exit(1)
+
+    org_id = sys.argv[1]
+
+    # Verify org exists
+    engine = create_engine(DATABASE_URL_SYNC)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM organizations WHERE id = :id"),
+            {"id": org_id},
+        ).fetchone()
+        if not row:
+            print(f"ERROR: Organization {org_id} not found")
+            sys.exit(1)
+
+    # Provision database
+    print(f"Provisioning database: {DB_NAME}")
+    warehouse_name = create_lakekeeper_warehouse(org_id, DB_NAME)
+    insert_org_database(engine, org_id, DB_NAME, warehouse_name)
+    catalog = get_catalog(warehouse_name)
+    ensure_namespace(catalog, NAMESPACE)
 
     # Gather all valid parquet files
     all_files = sorted(glob.glob(f"{DATA_DIR}/yellow_tripdata_*.parquet"))
@@ -121,26 +146,23 @@ def main():
         except Exception:
             print(f"Skipping incomplete file: {Path(f).name}")
 
-    # Split into legacy (before 2016-07) and modern (2016-07 onwards)
     legacy_files = [f for f in valid_files if get_file_month(f) < CUTOVER]
     modern_files = [f for f in valid_files if get_file_month(f) >= CUTOVER]
 
     print(f"Found {len(valid_files)} valid files: "
           f"{len(legacy_files)} legacy, {len(modern_files)} modern")
 
-    existing = [t[1] for t in catalog.list_tables(NAMESPACE)]
+    existing = [t[-1] for t in catalog.list_tables(NAMESPACE)]
 
-    # Legacy table: skip if already loaded
     if "yellow_trips_legacy" in existing:
-        print(f"\nSkipping nyc.yellow_trips_legacy (already loaded)")
+        print(f"\nSkipping {NAMESPACE}.yellow_trips_legacy (already loaded)")
     else:
-        load_files(legacy_files, "yellow_trips_legacy")
+        load_files(catalog, legacy_files, "yellow_trips_legacy")
 
-    # Modern table: drop and reload
     if "yellow_trips" in existing:
-        print(f"Dropping existing table nyc.yellow_trips")
+        print(f"Dropping existing table {NAMESPACE}.yellow_trips")
         catalog.drop_table(f"{NAMESPACE}.yellow_trips")
-    load_files(modern_files, "yellow_trips")
+    load_files(catalog, modern_files, "yellow_trips")
 
     print("\nDone.")
 
