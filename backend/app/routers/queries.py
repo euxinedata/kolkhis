@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
+from app.ddl import detect_ddl, execute_ddl
 from app.config import (
     RESULTS_PAGE_SIZE,
     S3_RESULTS_ACCESS_KEY,
@@ -57,11 +58,42 @@ async def create_query(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    from datetime import datetime
+
+    org_id = user.get("org_id", "")
+
+    # Intercept DDL statements (CREATE DATABASE, CREATE SCHEMA, etc.)
+    try:
+        ddl = detect_ddl(body.sql)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if ddl is not None:
+        job_id = str(uuid.uuid4())
+        try:
+            message = await execute_ddl(ddl, org_id, db)
+            job = QueryJob(
+                id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                status="completed", row_count=0,
+                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+            )
+            db.add(job)
+            await db.commit()
+            return {"job_id": job_id, "ddl_message": message}
+        except ValueError as e:
+            job = QueryJob(
+                id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                status="failed", error=str(e),
+                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+            )
+            db.add(job)
+            await db.commit()
+            raise HTTPException(status_code=400, detail=str(e))
+
     job_id = str(uuid.uuid4())
     job = QueryJob(id=job_id, user_id=int(user["sub"]), sql=body.sql, status="pending")
     db.add(job)
     await db.commit()
-    submit_query(job_id, body.sql, user_id=int(user["sub"]), org_id=user.get("org_id", ""))
+    submit_query(job_id, body.sql, user_id=int(user["sub"]), org_id=org_id)
     return {"job_id": job_id}
 
 

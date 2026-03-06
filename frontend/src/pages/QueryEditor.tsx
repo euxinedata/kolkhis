@@ -36,6 +36,7 @@ interface QueryTab {
   submitting: boolean
   startedAt: string | null
   elapsed: string | null
+  ddlMessage: string | null
 }
 
 interface CatalogTab {
@@ -83,7 +84,7 @@ function formatElapsed(ms: number): string {
 }
 
 function newQueryTab(id: number, name: string, sql = ''): QueryTab {
-  return { id, name, sql, jobId: null, status: null, error: null, result: null, submitting: false, startedAt: null, elapsed: null }
+  return { id, name, sql, jobId: null, status: null, error: null, result: null, submitting: false, startedAt: null, elapsed: null, ddlMessage: null }
 }
 
 export function QueryEditor() {
@@ -259,17 +260,26 @@ export function QueryEditor() {
   }
 
   async function submitSql(tabId: number, sql: string) {
-    updateTab(tabId, { submitting: true, error: null, result: null, status: null, startedAt: null, elapsed: null })
+    updateTab(tabId, { submitting: true, error: null, result: null, status: null, startedAt: null, elapsed: null, ddlMessage: null })
     try {
-      const { job_id } = await apiFetch<{ job_id: string }>('/api/queries', {
+      const resp = await apiFetch<{ job_id: string; ddl_message?: string }>('/api/queries', {
         method: 'POST',
         body: JSON.stringify({ sql }),
       })
-      updateTab(tabId, { jobId: job_id, status: 'pending', submitting: false })
-      setSearchParams({ job_id })
-      startPolling(tabId, job_id)
+      if (resp.ddl_message) {
+        updateTab(tabId, { jobId: resp.job_id, status: 'completed', submitting: false, ddlMessage: resp.ddl_message })
+        setCatalogRefreshKey(k => k + 1)
+      } else {
+        updateTab(tabId, { jobId: resp.job_id, status: 'pending', submitting: false })
+        setSearchParams({ job_id: resp.job_id })
+        startPolling(tabId, resp.job_id)
+      }
     } catch (e: unknown) {
-      updateTab(tabId, { error: e instanceof Error ? e.message : 'Submit failed', submitting: false })
+      let msg = 'Submit failed'
+      if (e instanceof Error) {
+        try { msg = JSON.parse(e.message).detail } catch { msg = e.message }
+      }
+      updateTab(tabId, { error: msg, submitting: false })
     }
   }
 
@@ -683,7 +693,7 @@ export function QueryEditor() {
                     {activeQ.status}{activeQ.elapsed && (activeQ.status === 'pending' || activeQ.status === 'provisioning' || activeQ.status === 'running') ? `  ${activeQ.elapsed}` : ''}
                   </span>
                 )}
-                {activeQ.jobId && activeQ.status === 'completed' && (
+                {activeQ.jobId && activeQ.status === 'completed' && !activeQ.ddlMessage && (
                   <>
                     <a href={`${API_URL}/api/queries/${activeQ.jobId}/export`} style={{ fontSize: '0.85em' }}>
                       Download CSV
@@ -706,6 +716,12 @@ export function QueryEditor() {
               <pre style={{ color: '#f87171', marginTop: '1em', whiteSpace: 'pre-wrap', fontSize: '0.85em', flexShrink: 0 }}>
                 {activeQ.error}
               </pre>
+            )}
+
+            {activeQ.ddlMessage && (
+              <div style={{ color: '#4ade80', padding: '1em 1em 0', fontSize: '0.85em', flexShrink: 0 }}>
+                {activeQ.ddlMessage}
+              </div>
             )}
 
             {activeQ.result && (
