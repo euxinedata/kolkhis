@@ -88,12 +88,13 @@ export function DatabaseDetail({ db }: { db: string }) {
 export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
   const [objects, setObjects] = useState<CatalogObjectInfo[] | null>(null)
   const [totalSize, setTotalSize] = useState<number>(0)
+  const [lastUpdatedMs, setLastUpdatedMs] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    apiFetch<{ objects: CatalogObjectInfo[]; total_size: number }>(`/api/catalog/databases/${db}/schemas/${schema}/objects`)
-      .then(d => { setObjects(d.objects); setTotalSize(d.total_size); setLoading(false) })
+    apiFetch<{ objects: CatalogObjectInfo[]; total_size: number; last_updated_ms: number | null }>(`/api/catalog/databases/${db}/schemas/${schema}/objects`)
+      .then(d => { setObjects(d.objects); setTotalSize(d.total_size); setLastUpdatedMs(d.last_updated_ms); setLoading(false) })
       .catch(() => setLoading(false))
   }, [db, schema])
 
@@ -124,6 +125,12 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
           <div className="object-detail-stat">
             <span className="object-detail-stat-label">Total size</span>
             <span className="object-detail-stat-value">{formatBytes(totalSize)}</span>
+          </div>
+        )}
+        {lastUpdatedMs !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Last updated</span>
+            <span className="object-detail-stat-value">{new Date(lastUpdatedMs).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'}</span>
           </div>
         )}
       </div>

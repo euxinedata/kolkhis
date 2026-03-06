@@ -66,18 +66,22 @@ async def list_objects(
     tables = catalog.list_tables(schema_name)
     result = []
     total_size = 0
+    last_updated_ms = None
     for t in tables:
         tbl = catalog.load_table(f"{schema_name}.{t[-1]}")
         col_count = len(tbl.schema().fields)
         file_size = None
         snapshot = tbl.current_snapshot()
-        if snapshot and snapshot.summary:
-            size = snapshot.summary.get("total-files-size")
-            if size is not None:
-                file_size = int(size)
-                total_size += file_size
+        if snapshot:
+            if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
+                last_updated_ms = snapshot.timestamp_ms
+            if snapshot.summary:
+                size = snapshot.summary.get("total-files-size")
+                if size is not None:
+                    file_size = int(size)
+                    total_size += file_size
         result.append({"name": t[-1], "type": "table", "columns": col_count, "file_size": file_size})
-    return {"objects": result, "total_size": total_size}
+    return {"objects": result, "total_size": total_size, "last_updated_ms": last_updated_ms}
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects/{obj_name}/schema")
