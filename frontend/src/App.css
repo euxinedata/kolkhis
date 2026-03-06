@@ -316,6 +316,11 @@
   margin-top: 0;
 }
 
+.results-panel .grid-container {
+  flex: 1;
+  overflow: hidden;
+}
+
 .results-panel .pagination {
   margin-top: 0;
   padding: 0.5em;
