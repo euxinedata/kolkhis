@@ -13,19 +13,19 @@ Organizations are the top-level tenant boundary. New users go through an **onboa
 - **Organization** — UUID primary key, unique name
 - **OrgMembership** — Links users to orgs with `role` (admin/member), `status` (pending/active), and `shell_username`
 - **JWT** contains one `org_id` at a time; users switch orgs via `/auth/switch-org`
-- Each org gets: a Gitea organization, a `warehouse` git repo, an S3 bucket, and isolated shell home directories
+- Each org gets: a Gitea organization, a `warehouse` git repo, per-database Lakekeeper warehouses, and isolated shell home directories
 - All workspace/terminal/catalog operations are scoped to the user's active org
 
 ## Architecture
 
 - **`backend/`** — FastAPI app with async SQLAlchemy (asyncpg driver) and Alembic migrations
   - `app/main.py` — FastAPI app with lifespan handler (creates tables, seeds data, bootstraps Gitea token, manages workers on startup)
-  - `app/models.py` — SQLAlchemy ORM models: Organization, User, OrgMembership, QueryJob, Country, UserSettings, WorkerVM, UsageEvent, ServerTypeRate, BillingPeriod
+  - `app/models.py` — SQLAlchemy ORM models: Organization, User, OrgMembership, QueryJob, Country, UserSettings, WorkerVM, UsageEvent, ServerTypeRate, BillingPeriod, OrgDatabase, ShellProvision
   - `app/database.py` — Async engine, session factory, and `get_db` FastAPI dependency
   - `app/config.py` — All configuration, loaded from project root `.env` file
   - `app/auth.py` — Google OAuth login, JWT token management (cookie + Bearer token), org switching
   - `app/billing.py` — Billing summary computation from usage events and server type rates
-  - `app/warehouse.py` — PyIceberg `RestCatalog` (Lakekeeper) initialization, cached per org
+  - `app/warehouse.py` — PyIceberg `RestCatalog` initialization, cached per database via `get_database_catalog(lakekeeper_warehouse)`
   - `app/gitea.py` — Async Gitea REST API client (orgs, repos, files, branches, PRs, token bootstrap)
   - `app/query_engine.py` — Query execution engine with three worker modes (see below)
   - `app/worker_manager.py` — Hetzner VM provisioning (remote mode only)
@@ -36,7 +36,7 @@ Organizations are the top-level tenant boundary. New users go through an **onboa
   - `alembic/` — Migration scripts; `env.py` reads `DATABASE_URL` (uses `psycopg2` sync driver for migrations)
 - **`worker/`** — Standalone DuckDB query worker service (FastAPI)
   - `app.py` — HTTP endpoints for job-based queries and persistent sessions (including Iceberg sessions)
-  - `executor.py` — DuckDB execution: Iceberg catalog setup (ATTACH + namespace aliases), S3 config, query execution
+  - `executor.py` — DuckDB execution: per-database Iceberg ATTACH, S3 config, query execution
   - `sessions.py` — Session lifecycle management (create, execute, keepalive, close, auto-reap idle sessions)
   - `config.py` — Worker config, loaded from project root `.env` file
 - **`shell/`** — Shared SSH container for user terminals
@@ -63,7 +63,7 @@ A single shell container runs `sshd` and provides per-user terminal sessions. Ea
 
 1. **Org-scoped `/home` mount**: The container's `/home` is bind-mounted from `./backend/data/homes/{org_id}` on the host. Each org gets its own mount.
 2. **Auth file management** (`app/shell.py`): The backend writes Linux auth files (passwd, shadow, group, gshadow) directly to `/home/.auth/` with file locking. UIDs are allocated starting from 1000. No SSH commands needed — pure file I/O.
-3. **User provisioning** (`ensure_shell_user()`): Derives a Linux username from email, writes auth entries, creates home directory with `~/.ssh`, `~/.dbt`, `~/projects`. Generates a long-lived JWT and writes `KOLKHIS_AUTH_TOKEN` + `KOLKHIS_BACKEND_URL` to `.bashrc` for dbt CLI.
+3. **User provisioning** (`ensure_shell_user()`): Derives a Linux username from email, writes auth entries, creates home directory with `~/.ssh`, `~/.dbt`, `~/projects`. Generates a long-lived JWT and writes `KOLKHIS_AUTH_TOKEN`, `KOLKHIS_BACKEND_URL`, and `DBT_USER` to `.bashrc` for dbt CLI.
 4. **Terminal sessions** (`app/routers/terminal.py`): The WebSocket endpoint authenticates via JWT cookie, then SSHes into the shell container **as the user's own account**. Auto-cds into `~/projects/warehouse`.
 5. **File operations** (`app/workspace.py`): The backend reads/writes files directly on the host at `HOMES_PATH/{org_id}/{shell_username}/projects/{repo_name}` — the same files the shell user sees via the bind mount.
 6. **Container startup** (`entrypoint.sh`): Merges system auth templates with user entries from `/home/.auth/`, symlinks `/etc/{passwd,shadow,...}` → `/home/.auth/`, starts sshd.
@@ -74,6 +74,7 @@ A single shell container runs `sshd` and provides per-user terminal sessions. Ea
 - Per-user home directories enable user-specific config (`~/.dbt/profiles.yml`, `.bashrc` with auth tokens)
 - Path structure: `HOMES_PATH/{org_id}/{shell_username}/projects/warehouse/`
 - `shell_username` has a global unique constraint; collisions append `-{user_id}`
+- `DBT_USER` env var exports the SQL-safe username (hyphens replaced with underscores)
 
 ### Configuration
 
@@ -88,7 +89,7 @@ Env vars in `.env`:
 
 ## Organization Lifecycle
 
-1. **Create** (`POST /api/orgs`): Creates Organization record + admin OrgMembership, provisions Gitea org + warehouse repo + S3 bucket, scaffolds dbt project (profiles.yml with `type: kolkhis` using env_var auth), provisions shell user in background.
+1. **Create** (`POST /api/orgs`): Creates Organization record + admin OrgMembership, provisions Gitea org + warehouse repo, creates S3 prefix + `development` database (Lakekeeper warehouse + OrgDatabase record), scaffolds dbt project (profiles.yml with `type: kolkhis`, `database: development`, `schema: dbt_{{ env_var('DBT_USER') }}`), provisions shell user in background.
 2. **Join** (`POST /api/orgs/{org_id}/join`): Creates pending OrgMembership. Requires admin approval.
 3. **Approve** (`POST /api/orgs/{org_id}/members/{user_id}/approve`): Admin sets status=active, provisions shell user + clones repo in background.
 4. **Switch** (`POST /auth/switch-org`): Updates JWT cookie with new org_id/org_role.
@@ -112,14 +113,32 @@ All under `/api/workspace/`:
 
 - `GITEA_SHELL_URL` — Gitea URL as seen from the shell container (defaults to `GITEA_URL`). Used for git remote URLs so that terminals can push/pull.
 
-## Iceberg Catalog (Lakekeeper)
+## Iceberg Catalog (Lakekeeper) — Per-Database Warehouses
 
-Lakekeeper is the Iceberg REST catalog. It stores table metadata in PostgreSQL and data in S3.
+Lakekeeper is the Iceberg REST catalog. It stores table metadata in PostgreSQL and data in S3. Each logical database in Kolkhis maps to a separate Lakekeeper warehouse, enabling native `database.schema.table` access (like Snowflake).
 
-- Backend uses PyIceberg `RestCatalog` (`app/warehouse.py`), cached per org via `get_org_catalog(org_id)`
-- Worker uses DuckDB's native `ATTACH ... TYPE ICEBERG` for DDL/DML support
-- Namespace aliases: nested Iceberg namespaces like `retail.products` are aliased as in-memory DuckDB databases/schemas so that `retail.products.table_name` works as `database.schema.table` in both the SQL Query workbook and dbt models
-- Config: `LAKEKEEPER_URL` (default: `http://localhost:8181`)
+### Data Model
+
+- **OrgDatabase** — Maps a logical database name to a Lakekeeper warehouse: `(org_id, name, lakekeeper_warehouse)`
+- Lakekeeper warehouse naming: `{org_id}-{db_name}` (e.g., `deeb8348-...-development`)
+- S3 key prefix: `{org_id}/{db_name}` within the shared bucket
+- Iceberg namespaces are flat within each warehouse (e.g., `products`, `stores`) — they become schemas in `database.schema.table`
+
+### How It Works
+
+- On org creation, the backend creates a `development` database (Lakekeeper warehouse + OrgDatabase record)
+- Additional databases can be created via scripts (e.g., `generate_retail_data.py` creates `retail_catalog`, `retail_ops`, `retail_sales`)
+- Backend catalog API (`app/routers/catalog.py`) lists databases from `org_databases` table, then queries each database's Lakekeeper warehouse for schemas/tables
+- Backend uses PyIceberg `RestCatalog` per database (`app/warehouse.py`), cached via `get_database_catalog(lakekeeper_warehouse)`
+- Worker ATTACHes each database as a named DuckDB database: `ATTACH '{lakekeeper_warehouse}' AS "{db_name}" (TYPE ICEBERG, ...)`
+- This gives native `database.schema.table` SQL access without namespace aliases
+
+### Configuration
+
+- `LAKEKEEPER_URL` — Lakekeeper REST catalog URL (default: `http://localhost:8181`)
+- `LAKEKEEPER_WORKER_URL` — Lakekeeper URL as seen from worker VMs (defaults to `LAKEKEEPER_URL`)
+- `S3_BUCKET_NAME` — Shared S3 bucket for all org data (default: `warehouse`, production: `pontus-dev-iceberg`)
+- `S3_INTERNAL_ENDPOINT` — S3 endpoint as seen from Lakekeeper (default: `S3_ENDPOINT`, docker: `http://minio:9000`)
 
 ## dbt Integration
 
@@ -128,14 +147,18 @@ The dbt-kolkhis adapter (`dbt-kolkhis` v0.6.0) connects dbt CLI to Kolkhis via t
 ### How It Works
 
 1. Shell container has `dbt-core` + `dbt-kolkhis` installed
-2. Each user's `.bashrc` exports `KOLKHIS_AUTH_TOKEN` and `KOLKHIS_BACKEND_URL`
-3. Warehouse `profiles.yml` uses `type: kolkhis` with `env_var()` for auth
+2. Each user's `.bashrc` exports `KOLKHIS_AUTH_TOKEN`, `KOLKHIS_BACKEND_URL`, and `DBT_USER`
+3. Warehouse `profiles.yml` uses `type: kolkhis` with `database: development` and `schema: "dbt_{{ env_var('DBT_USER') }}"`
 4. dbt CLI → backend `/api/dbt/session` proxy → worker Iceberg session
-5. Worker creates a persistent DuckDB connection with Lakekeeper ATTACH + namespace aliases
+5. Worker creates a persistent DuckDB connection with all org databases ATTACHed via Iceberg
+
+### Per-User dbt Schemas
+
+Each user gets their own schema `dbt_<username>` in the `development` database. Hyphens in usernames are replaced with underscores for SQL safety (e.g., `petkov-venelin` → `dbt_petkov_venelin`).
 
 ### dbt Session Endpoints
 
-- `POST /api/dbt/session` — Create or reuse Iceberg session on worker
+- `POST /api/dbt/session` — Create or reuse Iceberg session on worker (timeout: 1 hour)
 - `POST /api/dbt/session/{session_id}/query` — Execute SQL in session
 - `DELETE /api/dbt/session/{session_id}` — Close session
 
@@ -162,6 +185,35 @@ Session-based: `POST /session`, `POST /session/iceberg`, `POST /session/{id}/que
    ```
 2. Start the worker: `cd worker && uvicorn app:app --port 8080`
 3. Start the backend: `cd backend && uvicorn app.main:app --reload`
+
+## Data Generation Scripts
+
+All scripts run from `backend/` and take an `org_uuid` argument. They provision Lakekeeper warehouses, OrgDatabase records, namespaces, and table data.
+
+```bash
+cd backend/
+
+# Small sample data (~1K rows, 6 tables) for quick testing
+python scripts/generate_org_data.py <org_uuid>
+
+# Full retail dataset (~5.3B rows, 17 tables across 3 databases)
+python scripts/generate_retail_data.py <org_uuid>              # all tables
+python scripts/generate_retail_data.py <org_uuid> --skip-billions  # skip orders/order_lines/payments
+
+# Compact retail tables to ~512 MB file size
+python scripts/compact_retail_data.py <org_uuid>
+
+# NYC taxi data into a nyc_taxi database
+python scripts/load_taxi_data.py <org_uuid>
+```
+
+### Retail Data Schema
+
+3 databases, 6 schemas, 17 tables:
+
+- **`retail_catalog`**: `products` (categories, brands, suppliers, products), `pricing` (price_lists, promotions, promotion_products)
+- **`retail_ops`**: `stores` (regions, stores, employees), `inventory` (stock_levels, replenishment_orders)
+- **`retail_sales`**: `customers` (customers, loyalty_accounts), `transactions` (orders, order_lines, payments)
 
 ## Commands
 
@@ -200,12 +252,11 @@ npm run lint          # ESLint
 `docker-compose.yml` provides the local infrastructure. Run `docker compose up -d` to start all services:
 
 - **`db`** — PostgreSQL 17 (port `5437`); hosts databases: `euxine`, `gitea`, `lakekeeper`, `dagster`
-- **`minio`** / **`minio-init`** — S3-compatible object storage (ports `9000`/`9001`) + bucket creation
+- **`minio`** / **`minio-init`** — S3-compatible object storage (ports `9000`/`9001`), bucket `pontus-dev-iceberg`
 - **`gitea-init`** — Creates the `gitea` database in PostgreSQL
 - **`gitea`** — Gitea 1.23 rootless (port `3000`), uses PostgreSQL for its own data
 - **`gitea-setup`** — Creates the admin user (`kolkhis-admin`) via CLI after Gitea starts
 - **`lakekeeper-init`** / **`lakekeeper-migrate`** / **`lakekeeper`** — Iceberg REST catalog (port `8181`)
-- **`lakekeeper-setup`** — Creates `warehouse` S3 storage profile on Lakekeeper
 - **`shell`** — SSH container for user terminals (port `2222`); `/home` bind-mounted from `./backend/data/homes/{SHELL_ORG_UUID}`
 - **`dagster-init`** / **`dagster-code`** / **`dagster-webserver`** / **`dagster-daemon`** — Dagster orchestration (port `3030`)
 
@@ -217,10 +268,10 @@ Shared PostgreSQL instance hosts: `euxine` (app), `gitea`, `lakekeeper`, `dagste
 
 ## Object Storage
 
-The Iceberg warehouse lives in S3-compatible storage. Configured via `WAREHOUSE_PATH`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` in `.env`.
+The Iceberg warehouse lives in S3-compatible storage. Configured via `WAREHOUSE_PATH`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, `S3_BUCKET_NAME` in `.env`.
 
-- **Local development**: MinIO at `localhost:9000`, bucket `warehouse`
-- **Production**: Hetzner Object Storage
+- **Local development**: MinIO at `localhost:9000`, bucket `pontus-dev-iceberg`
+- **Production**: Hetzner Object Storage, bucket `pontus-dev-iceberg`
 
 ## Git Workflow
 
