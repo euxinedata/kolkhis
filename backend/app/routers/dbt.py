@@ -1,10 +1,12 @@
 import logging
 import re
+import uuid
+from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
@@ -20,7 +22,7 @@ from app.config import (
 )
 from app.database import get_db
 from app.ddl import detect_ddl, execute_ddl
-from app.models import OrgDatabase, OrgView
+from app.models import OrgDatabase, OrgView, QueryJob
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +152,14 @@ async def _forward_query(worker_url: str, session_id: str, sql: str, fetch_resul
         return resp.json()
 
 
+_DBT_COMMENT_RE = re.compile(r"^\s*/\*.*?\*/\s*", re.DOTALL)
+
+
+def _strip_dbt_comment(sql: str) -> str:
+    """Strip the leading /* ... */ comment block that dbt prepends to every query."""
+    return _DBT_COMMENT_RE.sub("", sql)
+
+
 # Regex for rewriting CREATE TABLE/DROP TABLE to target _ice_ prefix in overlay mode
 _CREATE_TABLE_RE = re.compile(
     r"^(\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)"
@@ -171,6 +181,24 @@ _CREATE_SCHEMA_RE = re.compile(
 )
 
 
+async def _touch_worker_vm(user_id: int):
+    """Update last_query_at on the user's WorkerVM so the idle reaper won't kill it."""
+    if WORKER_MODE != "remote":
+        return
+    try:
+        from app.database import async_session
+        from app.models import WorkerVM
+        async with async_session() as session:
+            await session.execute(
+                update(WorkerVM).where(WorkerVM.user_id == user_id).values(
+                    last_query_at=datetime.utcnow()
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("Failed to update WorkerVM.last_query_at for user %d", user_id)
+
+
 @router.post("/session/{session_id}/query")
 async def session_query(
     session_id: str,
@@ -185,19 +213,39 @@ async def session_query(
     worker_url = existing["worker_url"]
     org_id = user.get("org_id", "")
 
+    # Record query in history
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    job = QueryJob(
+        id=job_id, user_id=user_id, sql=body.sql,
+        status="running", started_at=now,
+    )
+    db.add(job)
+    await db.commit()
+
+    # Update worker VM timeout
+    await _touch_worker_vm(user_id)
+
     try:
+        # Strip dbt's leading /* ... */ comment for pattern matching
+        clean_sql = _strip_dbt_comment(body.sql)
+
         # Intercept CREATE/DROP VIEW — store in PostgreSQL, forward to worker session
-        ddl = detect_ddl(body.sql)
+        ddl = detect_ddl(clean_sql)
         if ddl and ddl["op"] == "create_view":
             await execute_ddl(ddl, org_id, db)
-            return await _forward_query(worker_url, session_id, body.sql, body.fetch_results)
+            result = await _forward_query(worker_url, session_id, clean_sql, body.fetch_results)
+            await _record_result(db, job_id, result)
+            return result
 
         if ddl and ddl["op"] == "drop_view":
             await execute_ddl(ddl, org_id, db)
-            return await _forward_query(worker_url, session_id, body.sql, body.fetch_results)
+            result = await _forward_query(worker_url, session_id, clean_sql, body.fetch_results)
+            await _record_result(db, job_id, result)
+            return result
 
         # Intercept CREATE TABLE — rewrite to target _ice_ prefix, then create pass-through view
-        m = _CREATE_TABLE_RE.match(body.sql)
+        m = _CREATE_TABLE_RE.match(clean_sql)
         if m:
             prefix, db_name, schema_name, table_name, rest = m.groups()
             ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"{rest}'
@@ -208,38 +256,68 @@ async def session_query(
                 f'AS SELECT * FROM "_ice_{db_name}"."{schema_name}"."{table_name}"'
             )
             await _forward_query(worker_url, session_id, view_sql, fetch_results=False)
+            await _record_result(db, job_id, result)
             return result
 
         # Intercept DROP TABLE — rewrite to _ice_ prefix, drop pass-through view
-        m = _DROP_TABLE_RE.match(body.sql)
+        m = _DROP_TABLE_RE.match(clean_sql)
         if m:
             prefix, db_name, schema_name, table_name, _ = m.groups()
             ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"'
             result = await _forward_query(worker_url, session_id, ice_sql, body.fetch_results)
             drop_view_sql = f'DROP VIEW IF EXISTS "{db_name}"."{schema_name}"."{table_name}"'
             await _forward_query(worker_url, session_id, drop_view_sql, fetch_results=False)
+            await _record_result(db, job_id, result)
             return result
 
         # Intercept CREATE SCHEMA — forward to both _ice_ and overlay databases
-        m = _CREATE_SCHEMA_RE.match(body.sql)
+        m = _CREATE_SCHEMA_RE.match(clean_sql)
         if m:
             prefix, db_name, schema_name, _ = m.groups()
             ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"'
             await _forward_query(worker_url, session_id, ice_sql, fetch_results=False)
             overlay_sql = f'{prefix}"{db_name}"."{schema_name}"'
-            return await _forward_query(worker_url, session_id, overlay_sql, body.fetch_results)
+            result = await _forward_query(worker_url, session_id, overlay_sql, body.fetch_results)
+            await _record_result(db, job_id, result)
+            return result
 
         # All other SQL — forward as-is
-        return await _forward_query(worker_url, session_id, body.sql, body.fetch_results)
+        result = await _forward_query(worker_url, session_id, body.sql, body.fetch_results)
+        await _record_result(db, job_id, result)
+        return result
 
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
+            await _record_result(db, job_id, {"status": "failed", "error": "Session not found"})
             raise HTTPException(status_code=404, detail="Session not found")
-        raise HTTPException(status_code=502, detail=f"Worker error: {exc.response.text}")
+        error_msg = f"Worker error: {exc.response.text}"
+        await _record_result(db, job_id, {"status": "failed", "error": error_msg})
+        raise HTTPException(status_code=502, detail=error_msg)
     except httpx.TransportError as exc:
-        raise HTTPException(status_code=502, detail=f"Worker unreachable: {exc}")
+        error_msg = f"Worker unreachable: {exc}"
+        await _record_result(db, job_id, {"status": "failed", "error": error_msg})
+        raise HTTPException(status_code=502, detail=error_msg)
     except ValueError as exc:
-        return {"status": "failed", "error": str(exc)}
+        result = {"status": "failed", "error": str(exc)}
+        await _record_result(db, job_id, result)
+        return result
+
+
+async def _record_result(db: AsyncSession, job_id: str, result: dict):
+    """Update the QueryJob with the worker result."""
+    now = datetime.utcnow()
+    status = result.get("status", "completed")
+    error = result.get("error") if status == "failed" else None
+    row_count = result.get("row_count")
+    await db.execute(
+        update(QueryJob).where(QueryJob.id == job_id).values(
+            status=status,
+            error=error[:2048] if error else None,
+            row_count=row_count,
+            completed_at=now,
+        )
+    )
+    await db.commit()
 
 
 @router.delete("/session/{session_id}")

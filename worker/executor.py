@@ -12,6 +12,37 @@ logger = logging.getLogger(__name__)
 # Module-level dict for cancellation support: job_id -> duckdb.DuckDBPyConnection
 _running_conns: dict[str, duckdb.DuckDBPyConnection] = {}
 
+# Regexes for rewriting CREATE/DROP TABLE to target _ice_ prefix in overlay databases
+_CREATE_TABLE_RE = re.compile(
+    r"^(\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)"
+    r'"?(\w+)"?\."?(\w+)"?\."?(\w+)"?'
+    r"(\s+.*)",
+    re.IGNORECASE | re.DOTALL,
+)
+_DROP_TABLE_RE = re.compile(
+    r"^(\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?)"
+    r'"?(\w+)"?\."?(\w+)"?\."?(\w+)"?'
+    r"(\s*;?\s*)$",
+    re.IGNORECASE,
+)
+
+
+def _rewrite_for_overlay(sql: str, overlay_dbs: set[str]) -> str:
+    """Rewrite CREATE/DROP TABLE to target _ice_ prefix for overlaid databases."""
+    if not overlay_dbs:
+        return sql
+    m = _CREATE_TABLE_RE.match(sql)
+    if m:
+        prefix, db_name, schema_name, table_name, rest = m.groups()
+        if db_name in overlay_dbs:
+            return f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"{rest}'
+    m = _DROP_TABLE_RE.match(sql)
+    if m:
+        prefix, db_name, schema_name, table_name, rest = m.groups()
+        if db_name in overlay_dbs:
+            return f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"{rest}'
+    return sql
+
 
 def cancel(job_id: str) -> bool:
     conn = _running_conns.get(job_id)
@@ -72,7 +103,7 @@ def setup_iceberg_catalog(
     s3_region: str,
     views: list[dict] | None = None,
     force_overlay: bool = False,
-) -> None:
+) -> set[str]:
     """ATTACH Iceberg REST catalogs — one per database.
 
     Each entry in ``databases`` has ``name`` (logical DB name, e.g. "development")
@@ -144,6 +175,8 @@ def setup_iceberg_catalog(
     for db_name, ice_name in overlay_dbs:
         _setup_overlay(conn, db_name, ice_name, views_by_db.get(db_name, []))
         logger.info("Overlay ready: %s", db_name)
+
+    return {db_name for db_name, _ in overlay_dbs}
 
 
 def setup_connection(
@@ -245,13 +278,14 @@ def execute_query(
     _running_conns[job_id] = conn
 
     try:
-        setup_iceberg_catalog(
+        overlay_dbs = setup_iceberg_catalog(
             conn, lakekeeper_url, databases,
             s3_endpoint, s3_access_key, s3_secret_key, s3_region,
             views=views,
         )
 
         sql = sql.strip().rstrip(";").strip()
+        sql = _rewrite_for_overlay(sql, overlay_dbs)
 
         if _classify_sql(sql) == "query":
             if not re.search(
