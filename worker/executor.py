@@ -26,10 +26,15 @@ def _create_namespace_aliases(
     conn: duckdb.DuckDBPyConnection,
     catalog_endpoint: str,
     warehouse: str,
+    catalog_alias: str,
 ) -> None:
     """Create in-memory alias databases/schemas so nested Iceberg namespaces
     like retail.products can be queried as retail.products.table_name
-    (database.schema.table), matching the SQL Query workbook convention."""
+    (database.schema.table), matching the SQL Query workbook convention.
+
+    ``warehouse`` is the Lakekeeper warehouse name (org UUID) used for API calls.
+    ``catalog_alias`` is the DuckDB ATTACH alias used in CREATE VIEW statements.
+    """
     # Get the catalog prefix from the REST config endpoint
     try:
         resp = httpx.get(f"{catalog_endpoint}/v1/config", params={"warehouse": warehouse}, timeout=10)
@@ -111,7 +116,7 @@ def _create_namespace_aliases(
                 try:
                     conn.execute(
                         f'CREATE VIEW "{db_name}"."{schema_name}"."{tbl_name}" AS '
-                        f'SELECT * FROM {warehouse}."{iceberg_schema}"."{tbl_name}"'
+                        f'SELECT * FROM {catalog_alias}."{iceberg_schema}"."{tbl_name}"'
                     )
                 except duckdb.Error as exc:
                     logger.warning("Failed to create alias view %s.%s.%s: %s", db_name, schema_name, tbl_name, exc)
@@ -162,7 +167,7 @@ def setup_iceberg_catalog(
 
     # Create alias views so nested namespaces like retail.products.brands
     # work the same way as in the SQL Query workbook (database.schema.table).
-    _create_namespace_aliases(conn, catalog_endpoint, "warehouse")
+    _create_namespace_aliases(conn, catalog_endpoint, warehouse, "warehouse")
 
 
 def setup_connection(

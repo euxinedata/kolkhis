@@ -77,6 +77,21 @@ async def _create_org_storage(org_id: str) -> None:
         if resp.status_code not in (201, 409):
             raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
 
+        # Create 'default' namespace so dbt works out of the box (profiles.yml uses schema: default)
+        config_resp = await client.get(
+            f"{LAKEKEEPER_URL}/catalog/v1/config",
+            params={"warehouse": org_id},
+        )
+        config_resp.raise_for_status()
+        prefix = config_resp.json().get("defaults", {}).get("prefix", "")
+        if prefix:
+            ns_resp = await client.post(
+                f"{LAKEKEEPER_URL}/catalog/v1/{prefix}/namespaces",
+                json={"namespace": ["default"]},
+            )
+            if ns_resp.status_code not in (200, 409):
+                logger.warning("Failed to create default namespace: %s %s", ns_resp.status_code, ns_resp.text)
+
 
 # dbt + dagster scaffold for the warehouse monorepo
 _WAREHOUSE_SCAFFOLD = {
