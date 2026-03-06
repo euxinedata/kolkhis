@@ -42,6 +42,8 @@ interface ObjectSchema {
 interface CatalogObjectInfo {
   name: string
   type: string
+  columns: number
+  file_size: number | null
 }
 
 export function DatabaseDetail({ db }: { db: string }) {
@@ -85,12 +87,13 @@ export function DatabaseDetail({ db }: { db: string }) {
 
 export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
   const [objects, setObjects] = useState<CatalogObjectInfo[] | null>(null)
+  const [totalSize, setTotalSize] = useState<number>(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    apiFetch<CatalogObjectInfo[]>(`/api/catalog/databases/${db}/schemas/${schema}/objects`)
-      .then(d => { setObjects(d); setLoading(false) })
+    apiFetch<{ objects: CatalogObjectInfo[]; total_size: number }>(`/api/catalog/databases/${db}/schemas/${schema}/objects`)
+      .then(d => { setObjects(d.objects); setTotalSize(d.total_size); setLoading(false) })
       .catch(() => setLoading(false))
   }, [db, schema])
 
@@ -107,7 +110,22 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
         <span className="object-detail-name">{schema}</span>
       </div>
       <div className="object-detail-section">
-        <span className="object-detail-label">{tables.length} {tables.length === 1 ? 'table' : 'tables'}, {views.length} {views.length === 1 ? 'view' : 'views'}</span>
+        <div className="object-detail-stat">
+          <span className="object-detail-stat-label">Tables</span>
+          <span className="object-detail-stat-value">{tables.length}</span>
+        </div>
+        {views.length > 0 && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Views</span>
+            <span className="object-detail-stat-value">{views.length}</span>
+          </div>
+        )}
+        {totalSize > 0 && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Total size</span>
+            <span className="object-detail-stat-value">{formatBytes(totalSize)}</span>
+          </div>
+        )}
       </div>
       <div className="object-detail-columns">
         <table>
@@ -115,6 +133,8 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
             <tr>
               <th className="tree-col-name">Object</th>
               <th className="tree-col-type">Type</th>
+              <th className="tree-col-type">Columns</th>
+              <th className="tree-col-type">Size</th>
             </tr>
           </thead>
           <tbody>
@@ -122,6 +142,8 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
               <tr key={o.name}>
                 <td className="tree-col-name">{o.name}</td>
                 <td className="tree-col-type">{o.type}</td>
+                <td className="tree-col-type">{o.columns}</td>
+                <td className="tree-col-type">{o.file_size !== null ? formatBytes(o.file_size) : '—'}</td>
               </tr>
             ))}
           </tbody>

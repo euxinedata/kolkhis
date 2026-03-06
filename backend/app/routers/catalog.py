@@ -64,7 +64,20 @@ async def list_objects(
     org_db = await _get_org_db(db_name, auth, db)
     catalog = get_database_catalog(org_db.lakekeeper_warehouse)
     tables = catalog.list_tables(schema_name)
-    return [{"name": t[-1], "type": "table"} for t in tables]
+    result = []
+    total_size = 0
+    for t in tables:
+        tbl = catalog.load_table(f"{schema_name}.{t[-1]}")
+        col_count = len(tbl.schema().fields)
+        file_size = None
+        snapshot = tbl.current_snapshot()
+        if snapshot and snapshot.summary:
+            size = snapshot.summary.get("total-files-size")
+            if size is not None:
+                file_size = int(size)
+                total_size += file_size
+        result.append({"name": t[-1], "type": "table", "columns": col_count, "file_size": file_size})
+    return {"objects": result, "total_size": total_size}
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects/{obj_name}/schema")

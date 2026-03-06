@@ -107,9 +107,10 @@ class CatalogTreeDataProvider implements TreeDataProvider<CatalogEntry> {
     const parentId = `${db}.${schema}`
     const existing = this.items[parentId]
     if (existing?.children && existing.children.length > 0) return
-    const objects = await apiFetch<{ name: string; type: string }[]>(
+    const data = await apiFetch<{ objects: { name: string; type: string }[] }>(
       `/api/catalog/databases/${db}/schemas/${schema}/objects`
     )
+    const objects = data.objects
     for (const obj of objects) {
       const id = `${db}.${schema}.${obj.name}`
       this.items[id] = {
