@@ -40,7 +40,7 @@ def _setup_overlay(
     ).fetchall()
 
     for (schema_name,) in schemas:
-        conn.execute(f'CREATE SCHEMA "{db_name}"."{schema_name}"')
+        conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_name}"."{schema_name}"')
         tables = conn.execute(
             f"SELECT table_name FROM duckdb_tables() "
             f"WHERE database_name = '{ice_name}' AND schema_name = '{schema_name}'"
