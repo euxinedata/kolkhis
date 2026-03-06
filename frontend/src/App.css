@@ -480,6 +480,42 @@
   padding: 1em 1.5em;
 }
 
+.catalog-breadcrumb {
+  display: flex;
+  align-items: center;
+  font-size: 0.8em;
+  margin-bottom: 0.3em;
+  color: #909090;
+}
+
+.catalog-breadcrumb-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 0.3em;
+}
+
+.catalog-breadcrumb-sep {
+  margin: 0 0.4em;
+  color: #555;
+}
+
+.catalog-link {
+  color: #909090;
+  cursor: pointer;
+}
+
+.catalog-link:hover {
+  color: #ccc;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td {
+  background: #1a1a2a;
+}
+
 .object-detail-header {
   display: flex;
   align-items: center;

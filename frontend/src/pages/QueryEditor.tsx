@@ -754,11 +754,11 @@ export function QueryEditor() {
         {activeType === 'catalog' && catalogTabs.map(tab => (
           activeCatalogTab === tab.id && (
             tab.type === 'database' ? (
-              <DatabaseDetail key={tab.id} db={tab.db!} />
+              <DatabaseDetail key={tab.id} db={tab.db!} onNavigate={handleSelectObject} />
             ) : tab.type === 'schema' ? (
-              <SchemaDetail key={tab.id} db={tab.db!} schema={tab.schema!} />
+              <SchemaDetail key={tab.id} db={tab.db!} schema={tab.schema!} onNavigate={handleSelectObject} />
             ) : (
-              <ObjectDetail key={tab.id} db={tab.db!} schema={tab.schema!} name={tab.name!} objectType={tab.objectType!} onPreview={handlePreview} />
+              <ObjectDetail key={tab.id} db={tab.db!} schema={tab.schema!} name={tab.name!} objectType={tab.objectType!} onPreview={handlePreview} onNavigate={handleSelectObject} />
             )
           )
         ))}

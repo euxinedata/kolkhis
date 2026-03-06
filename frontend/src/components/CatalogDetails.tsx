@@ -52,7 +52,9 @@ interface SchemaInfo {
   file_size: number
 }
 
-export function DatabaseDetail({ db }: { db: string }) {
+type OnNavigate = (db: string, schema: string, name: string, objectType: string) => void
+
+export function DatabaseDetail({ db, onNavigate }: { db: string; onNavigate?: OnNavigate }) {
   const [schemas, setSchemas] = useState<SchemaInfo[] | null>(null)
   const [totalSize, setTotalSize] = useState<number>(0)
   const [totalTables, setTotalTables] = useState<number>(0)
@@ -108,7 +110,7 @@ export function DatabaseDetail({ db }: { db: string }) {
           </thead>
           <tbody>
             {schemas.map(s => (
-              <tr key={s.name}>
+              <tr key={s.name} className={onNavigate ? 'clickable-row' : ''} onClick={onNavigate ? () => onNavigate(db, s.name, '', 'schema') : undefined}>
                 <td className="tree-col-name">{s.name}</td>
                 <td className="tree-col-type">{s.tables}</td>
                 <td className="tree-col-type">{s.file_size > 0 ? formatBytes(s.file_size) : '—'}</td>
@@ -121,7 +123,7 @@ export function DatabaseDetail({ db }: { db: string }) {
   )
 }
 
-export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
+export function SchemaDetail({ db, schema, onNavigate }: { db: string; schema: string; onNavigate?: OnNavigate }) {
   const [objects, setObjects] = useState<CatalogObjectInfo[] | null>(null)
   const [totalSize, setTotalSize] = useState<number>(0)
   const [lastUpdatedMs, setLastUpdatedMs] = useState<number | null>(null)
@@ -142,6 +144,12 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
 
   return (
     <div className="object-detail">
+      {onNavigate && (
+        <div className="catalog-breadcrumb">
+          <img className="catalog-breadcrumb-icon" src="/file-icons/database.svg" alt="" />
+          <a className="catalog-link" onClick={() => onNavigate(db, '', '', 'database')}>{db}</a>
+        </div>
+      )}
       <div className="object-detail-header">
         <img className="catalog-detail-icon" src="/file-icons/folder-blue.svg" alt="" />
         <span className="object-detail-name">{schema}</span>
@@ -182,7 +190,7 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
           </thead>
           <tbody>
             {objects.map(o => (
-              <tr key={o.name}>
+              <tr key={o.name} className={onNavigate ? 'clickable-row' : ''} onClick={onNavigate ? () => onNavigate(db, schema, o.name, o.type) : undefined}>
                 <td className="tree-col-name">{o.name}</td>
                 <td className="tree-col-type">{o.type}</td>
                 <td className="tree-col-type">{o.columns}</td>
@@ -196,7 +204,7 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
   )
 }
 
-export function ObjectDetail({ db, schema, name, objectType, onPreview }: { db: string; schema: string; name: string; objectType: string; onPreview?: (sql: string) => void }) {
+export function ObjectDetail({ db, schema, name, objectType, onPreview, onNavigate }: { db: string; schema: string; name: string; objectType: string; onPreview?: (sql: string) => void; onNavigate?: OnNavigate }) {
   const [data, setData] = useState<ObjectSchema | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -227,9 +235,18 @@ export function ObjectDetail({ db, schema, name, objectType, onPreview }: { db: 
 
   return (
     <div className="object-detail">
+      {onNavigate && (
+        <div className="catalog-breadcrumb">
+          <img className="catalog-breadcrumb-icon" src="/file-icons/database.svg" alt="" />
+          <a className="catalog-link" onClick={() => onNavigate(db, '', '', 'database')}>{db}</a>
+          <span className="catalog-breadcrumb-sep">/</span>
+          <img className="catalog-breadcrumb-icon" src="/file-icons/folder-blue.svg" alt="" />
+          <a className="catalog-link" onClick={() => onNavigate(db, schema, '', 'schema')}>{schema}</a>
+        </div>
+      )}
       <div className="object-detail-header">
         <span className={`tree-type-badge ${badge.cls}`}>{badge.label}</span>
-        <span className="object-detail-name">{qualifiedName}</span>
+        <span className="object-detail-name">{name}</span>
         <button className="copy-name-button" onClick={handleCopy} title="Copy qualified name">
           {copied ? 'Copied' : 'Copy'}
         </button>
