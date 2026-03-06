@@ -5,6 +5,7 @@ import type { editor } from 'monaco-editor'
 import { apiFetch, API_URL } from '../api'
 import { CatalogPanel } from '../components/CatalogPanel'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
+import { ResultsGrid } from '../components/ResultsGrid'
 import { useStatusBarEffect } from '../StatusBarContext'
 import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
 
@@ -715,25 +716,11 @@ export function QueryEditor() {
                   <span>{activeQ.result.total} rows</span>
                   <button className="results-close" onClick={() => updateTab(activeQ.id, { result: null })} title="Close results">✕</button>
                 </div>
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        {activeQ.result.columns.map(col => (
-                          <th key={col}>{col}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeQ.result.rows.map((row, i) => (
-                        <tr key={i}>
-                          {activeQ.result!.columns.map(col => (
-                            <td key={col}>{String(row[col] ?? '')}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="grid-container">
+                  <ResultsGrid
+                    columns={activeQ.result.columns}
+                    rows={activeQ.result.rows}
+                  />
                 </div>
                 <div className="pagination">
                   <button disabled={activeQ.result.page === 0} onClick={() => handlePage(activeQ.id, activeQ.result!.page - 1)}>
