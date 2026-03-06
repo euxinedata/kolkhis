@@ -107,6 +107,12 @@ def setup_iceberg_catalog(
         views_by_db.setdefault(v["database"], []).append(v)
 
     catalog_endpoint = f"{lakekeeper_url}/catalog"
+
+    # Two-pass setup: first ATTACH all databases, then set up overlays.
+    # This ensures cross-database view references resolve correctly
+    # (e.g. a view in "development" referencing "retail_sales.customers.t").
+    overlay_dbs: list[tuple[str, str]] = []  # (db_name, ice_name)
+
     for db in databases:
         db_name = db["name"]
         needs_overlay = force_overlay or db_name in views_by_db
@@ -121,8 +127,8 @@ def setup_iceberg_catalog(
                     ACCESS_DELEGATION_MODE 'none'
                 )
             """)
-            _setup_overlay(conn, db_name, ice_name, views_by_db.get(db_name, []))
-            logger.info("Attached database with overlay: %s -> %s", db_name, db["lakekeeper_warehouse"])
+            overlay_dbs.append((db_name, ice_name))
+            logger.info("Attached Iceberg: %s -> %s", ice_name, db["lakekeeper_warehouse"])
         else:
             conn.execute(f"""
                 ATTACH '{db["lakekeeper_warehouse"]}' AS "{db_name}" (
@@ -133,6 +139,11 @@ def setup_iceberg_catalog(
                 )
             """)
             logger.info("Attached database: %s -> %s", db_name, db["lakekeeper_warehouse"])
+
+    # Second pass: set up memory overlays now that all databases are ATTACHed
+    for db_name, ice_name in overlay_dbs:
+        _setup_overlay(conn, db_name, ice_name, views_by_db.get(db_name, []))
+        logger.info("Overlay ready: %s", db_name)
 
 
 def setup_connection(
