@@ -1,12 +1,16 @@
-"""Generate sample retail data into an org's S3 bucket.
+"""Generate small sample retail data for quick testing.
+
+Creates the same 3-database structure as generate_retail_data.py but with
+much smaller row counts (~1K-50K rows per table, no chunked writes).
 
 Usage:
+    cd backend/
     python scripts/generate_org_data.py <org_uuid>
 """
 
 import sys
 import time
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -14,9 +18,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow as pa
 from faker import Faker
-from pyiceberg.catalog.rest import RestCatalog
+from sqlalchemy import create_engine, text
 
-from app.config import LAKEKEEPER_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
+from app.config import DATABASE_URL_SYNC
+from scripts.generate_retail_data import (
+    COUNTRIES,
+    DATABASES,
+    DEPT_TREE,
+    create_lakekeeper_warehouse,
+    create_table,
+    elapsed,
+    ensure_namespace,
+    get_catalog,
+    insert_org_database,
+    random_dates,
+    random_timestamps,
+)
 
 SEED = 42
 fake = Faker()
@@ -30,43 +47,6 @@ N_SUPPLIERS = 200
 N_PRODUCTS = 1_000
 N_REGIONS = 20
 N_STORES = 50
-
-COUNTRIES = ["US", "GB", "DE", "FR", "JP", "CA", "AU", "BR", "IN", "CN"]
-
-DEPT_TREE = {
-    "Electronics": {
-        "Computers": ["Laptops", "Desktops", "Tablets"],
-        "Phones": ["Smartphones", "Accessories"],
-        "Audio": ["Headphones", "Speakers"],
-    },
-    "Clothing": {
-        "Men": ["Shirts", "Pants", "Shoes"],
-        "Women": ["Dresses", "Tops", "Shoes"],
-    },
-    "Home & Garden": {
-        "Furniture": ["Living Room", "Bedroom", "Office"],
-        "Kitchen": ["Cookware", "Appliances"],
-    },
-}
-
-
-def elapsed(start: float) -> str:
-    return f"{time.time() - start:.1f}s"
-
-
-def random_dates(start: date, end: date, n: int) -> pa.Array:
-    days = (end - start).days
-    offsets = rng.integers(0, days + 1, size=n)
-    epoch = date(1970, 1, 1)
-    base = (start - epoch).days
-    return pa.array((base + offsets).astype(np.int32), type=pa.date32())
-
-
-def random_timestamps(start: date, end: date, n: int) -> pa.Array:
-    start_ts = int(datetime(start.year, start.month, start.day).timestamp())
-    end_ts = int(datetime(end.year, end.month, end.day, 23, 59, 59).timestamp())
-    ts = rng.integers(start_ts, end_ts + 1, size=n)
-    return pa.array(ts * 1_000_000, type=pa.timestamp("us"))
 
 
 def gen_categories() -> pa.Table:
@@ -191,61 +171,51 @@ def main():
         sys.exit(1)
 
     org_id = sys.argv[1]
+    t_start = time.time()
 
-    print(f"Generating data for org {org_id}")
+    print(f"Generating sample data for org {org_id}")
 
-    catalog = RestCatalog(
-        f"org-{org_id}",
-        uri=f"{LAKEKEEPER_URL}/catalog",
-        warehouse="warehouse",
-        **{
-            "s3.endpoint": S3_ENDPOINT,
-            "s3.access-key-id": S3_ACCESS_KEY,
-            "s3.secret-access-key": S3_SECRET_KEY,
-            "s3.region": S3_REGION,
-        },
-    )
+    # Verify org exists
+    engine = create_engine(DATABASE_URL_SYNC)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM organizations WHERE id = :id"),
+            {"id": org_id},
+        ).fetchone()
+        if not row:
+            print(f"ERROR: Organization {org_id} not found")
+            sys.exit(1)
 
-    # Create namespaces
-    ns = "retail.products"
-    for n in ["retail", "retail.products", "retail.stores"]:
-        existing = {".".join(t) for t in catalog.list_namespaces()}
-        if n not in existing:
-            catalog.create_namespace(n)
-            print(f"  Created namespace {n}")
+    # Provision databases
+    catalogs = {}
+    for db_name, schemas in DATABASES.items():
+        print(f"\nProvisioning database: {db_name}")
+        warehouse_name = create_lakekeeper_warehouse(org_id, db_name)
+        insert_org_database(engine, org_id, db_name, warehouse_name)
+        cat = get_catalog(warehouse_name)
+        catalogs[db_name] = cat
+        for schema in schemas:
+            ensure_namespace(cat, schema)
 
-    # retail.products
-    t0 = time.time()
-    tables = {
-        "categories": gen_categories(),
-        "brands": gen_brands(),
-        "suppliers": gen_suppliers(),
-        "products": gen_products(),
-    }
-    for name, tbl in tables.items():
-        full = f"retail.products.{name}"
-        existing = {t[-1] for t in catalog.list_tables("retail.products")}
-        if name in existing:
-            catalog.drop_table(full)
-        it = catalog.create_table(full, schema=tbl.schema)
+    # retail_catalog.products
+    cat = catalogs["retail_catalog"]
+    for name, tbl in [("categories", gen_categories()), ("brands", gen_brands()),
+                      ("suppliers", gen_suppliers()), ("products", gen_products())]:
+        full = f"products.{name}"
+        it = create_table(cat, "products", name, tbl.schema)
         it.append(tbl)
         print(f"  {full}: {tbl.num_rows:,} rows")
 
-    # retail.stores
-    tables = {
-        "regions": gen_regions(),
-        "stores": gen_stores(),
-    }
-    for name, tbl in tables.items():
-        full = f"retail.stores.{name}"
-        existing = {t[-1] for t in catalog.list_tables("retail.stores")}
-        if name in existing:
-            catalog.drop_table(full)
-        it = catalog.create_table(full, schema=tbl.schema)
+    # retail_ops.stores
+    cat = catalogs["retail_ops"]
+    for name, tbl in [("regions", gen_regions()), ("stores", gen_stores())]:
+        full = f"stores.{name}"
+        it = create_table(cat, "stores", name, tbl.schema)
         it.append(tbl)
         print(f"  {full}: {tbl.num_rows:,} rows")
 
-    print(f"\nDone in {elapsed(t0)}")
+    print(f"\nDone in {elapsed(t_start)}")
+    print("\nRestart the backend to pick up the new databases.")
 
 
 if __name__ == "__main__":
