@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.ddl import detect_ddl, execute_ddl
+from app.ddl import detect_ddl, execute_ddl, execute_show
 from app.config import (
     RESULTS_PAGE_SIZE,
     S3_RESULTS_ACCESS_KEY,
@@ -70,15 +70,26 @@ async def create_query(
     if ddl is not None:
         job_id = str(uuid.uuid4())
         try:
-            message = await execute_ddl(ddl, org_id, db)
-            job = QueryJob(
-                id=job_id, user_id=int(user["sub"]), sql=body.sql,
-                status="completed", row_count=0,
-                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
-            )
-            db.add(job)
-            await db.commit()
-            return {"job_id": job_id, "ddl_message": message}
+            if ddl["op"].startswith("show_"):
+                row_count = await execute_show(ddl, org_id, job_id, db)
+                job = QueryJob(
+                    id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                    status="completed", row_count=row_count,
+                    started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                )
+                db.add(job)
+                await db.commit()
+                return {"job_id": job_id}
+            else:
+                message = await execute_ddl(ddl, org_id, db)
+                job = QueryJob(
+                    id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                    status="completed", row_count=0,
+                    started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+                )
+                db.add(job)
+                await db.commit()
+                return {"job_id": job_id, "ddl_message": message}
         except ValueError as e:
             job = QueryJob(
                 id=job_id, user_id=int(user["sub"]), sql=body.sql,

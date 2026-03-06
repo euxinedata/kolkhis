@@ -4,15 +4,17 @@ import re
 import logging
 
 import httpx
+import pyarrow as pa
+import pyarrow.parquet as pq
 from pyiceberg.exceptions import NoSuchNamespaceError, NoSuchTableError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
-    LAKEKEEPER_URL, S3_BUCKET_NAME, S3_INTERNAL_ENDPOINT,
+    LAKEKEEPER_URL, RESULTS_PATH, S3_BUCKET_NAME, S3_INTERNAL_ENDPOINT,
     S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION,
 )
-from app.models import OrgDatabase
+from app.models import OrgDatabase, OrgView
 from app.warehouse import get_database_catalog
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,11 @@ _CREATE_SCHEMA_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CREATE_VIEW_RE = re.compile(
+    rf"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+{_IDENT}\.{_IDENT}\.{_IDENT}\s+AS\s+",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # DROP patterns
 _DROP_DATABASE_RE = re.compile(
     rf"^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?{_IDENT}\s*;?\s*$",
@@ -40,7 +47,7 @@ _DROP_SCHEMA_RE = re.compile(
     re.IGNORECASE,
 )
 _DROP_TABLE_RE = re.compile(
-    rf"^\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?{_IDENT}\.{_IDENT}\.{_IDENT}\s*;?\s*$",
+    rf"^\s*DROP\s+(TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?{_IDENT}\.{_IDENT}\.{_IDENT}\s*;?\s*$",
     re.IGNORECASE,
 )
 
@@ -54,7 +61,21 @@ _CREATE_SCHEMA_BAD_QUOTES_RE = re.compile(
     re.IGNORECASE,
 )
 _DROP_BAD_QUOTES_RE = re.compile(
-    r"^\s*DROP\s+(?:DATABASE|SCHEMA|TABLE)\s+(?:IF\s+EXISTS\s+)?.*'.*$",
+    r"^\s*DROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?.*'.*$",
+    re.IGNORECASE,
+)
+
+# SHOW patterns
+_SHOW_DATABASES_RE = re.compile(
+    r"^\s*SHOW\s+DATABASES\s*;?\s*$",
+    re.IGNORECASE,
+)
+_SHOW_SCHEMAS_RE = re.compile(
+    rf"^\s*SHOW\s+SCHEMAS\s+IN\s+{_IDENT}\s*;?\s*$",
+    re.IGNORECASE,
+)
+_SHOW_TABLES_RE = re.compile(
+    rf"^\s*SHOW\s+TABLES\s+IN\s+{_IDENT}\.{_IDENT}\s*;?\s*$",
     re.IGNORECASE,
 )
 
@@ -84,7 +105,31 @@ def detect_ddl(sql: str) -> dict | None:
 
     m = _DROP_TABLE_RE.match(sql)
     if m:
-        return {"op": "drop_table", "database": _extract_ident(m, 1), "schema": _extract_ident(m, 3), "name": _extract_ident(m, 5)}
+        kind = m.group(1).lower()  # "table" or "view"
+        return {"op": f"drop_{kind}", "database": _extract_ident(m, 2), "schema": _extract_ident(m, 4), "name": _extract_ident(m, 6)}
+
+    # SHOW commands
+    if _SHOW_DATABASES_RE.match(sql):
+        return {"op": "show_databases"}
+
+    m = _SHOW_SCHEMAS_RE.match(sql)
+    if m:
+        return {"op": "show_schemas", "database": _extract_ident(m, 1)}
+
+    m = _SHOW_TABLES_RE.match(sql)
+    if m:
+        return {"op": "show_tables", "database": _extract_ident(m, 1), "schema": _extract_ident(m, 3)}
+
+    m = _CREATE_VIEW_RE.match(sql)
+    if m:
+        or_replace = bool(re.match(r"^\s*CREATE\s+OR\s+REPLACE\s+", sql, re.IGNORECASE))
+        database = _extract_ident(m, 1)
+        schema = _extract_ident(m, 3)
+        name = _extract_ident(m, 5)
+        # Extract the SQL body after "AS "
+        body_start = m.end()
+        view_sql = sql[body_start:].strip().rstrip(";").strip()
+        return {"op": "create_view", "database": database, "schema": schema, "name": name, "view_sql": view_sql, "or_replace": or_replace}
 
     # Check for single-quoted identifiers and return a helpful error
     if _CREATE_DATABASE_BAD_QUOTES_RE.match(sql):
@@ -174,6 +219,18 @@ async def _delete_lakekeeper_warehouse(warehouse_name: str) -> None:
             raise Exception(f"Failed to delete warehouse: {resp.status_code} {resp.text}")
 
 
+def _drop_namespace_cascade(catalog, namespace: str) -> None:
+    """Drop all tables and views in a namespace, then drop the namespace."""
+    for table_id in catalog.list_tables(namespace):
+        catalog.drop_table(f"{namespace}.{table_id[1]}")
+    try:
+        for view_id in catalog.list_views(namespace):
+            catalog.drop_view(f"{namespace}.{view_id[1]}")
+    except Exception:
+        pass  # list_views may not be supported
+    catalog.drop_namespace(namespace)
+
+
 async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
     """Execute a DDL operation. Returns a success message."""
     op = ddl["op"]
@@ -213,6 +270,49 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
         catalog.create_namespace_if_not_exists(schema_name)
         return f"Schema '{database}.{schema_name}' created"
 
+    elif op == "create_view":
+        database = ddl["database"]
+        schema_name = ddl["schema"]
+        view_name = ddl["name"]
+        view_sql = ddl["view_sql"]
+        or_replace = ddl.get("or_replace", False)
+
+        # Validate database exists
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        # Check for existing view
+        result = await db.execute(
+            select(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == database,
+                OrgView.schema_name == schema_name,
+                OrgView.name == view_name,
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if not or_replace:
+                raise ValueError(f"View '{database}.{schema_name}.{view_name}' already exists")
+            existing.view_sql = view_sql
+        else:
+            db.add(OrgView(
+                org_id=org_id,
+                database=database,
+                schema_name=schema_name,
+                name=view_name,
+                view_sql=view_sql,
+            ))
+        await db.commit()
+        return f"View '{database}.{schema_name}.{view_name}' created"
+
     elif op == "drop_table":
         database = ddl["database"]
         schema_name = ddl["schema"]
@@ -235,6 +335,48 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
             raise ValueError(f"Table '{database}.{table_id}' not found")
         return f"Table '{database}.{table_id}' dropped"
 
+    elif op == "drop_view":
+        database = ddl["database"]
+        schema_name = ddl["schema"]
+        view_name = ddl["name"]
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        view_id = f"{schema_name}.{view_name}"
+        found = False
+
+        # Try Lakekeeper first (views created by PyIceberg)
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        try:
+            catalog.drop_view(view_id)
+            found = True
+        except (NoSuchTableError, Exception):
+            pass
+
+        # Also delete from org_views (views created via our DDL handler)
+        result = await db.execute(
+            delete(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == database,
+                OrgView.schema_name == schema_name,
+                OrgView.name == view_name,
+            )
+        )
+        if result.rowcount > 0:
+            found = True
+            await db.commit()
+
+        if not found:
+            raise ValueError(f"View '{database}.{view_id}' not found")
+        return f"View '{database}.{view_id}' dropped"
+
     elif op == "drop_schema":
         database = ddl["database"]
         schema_name = ddl["name"]
@@ -249,10 +391,7 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
             raise ValueError(f"Database '{database}' not found")
 
         catalog = get_database_catalog(org_db.lakekeeper_warehouse)
-        try:
-            catalog.drop_namespace(schema_name)
-        except NoSuchNamespaceError:
-            raise ValueError(f"Schema '{database}.{schema_name}' not found")
+        _drop_namespace_cascade(catalog, schema_name)
         return f"Schema '{database}.{schema_name}' dropped"
 
     elif op == "drop_database":
@@ -266,6 +405,11 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
         org_db = result.scalar_one_or_none()
         if org_db is None:
             raise ValueError(f"Database '{name}' not found")
+
+        # Cascade: drop all schemas (which drops all tables/views)
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        for ns in catalog.list_namespaces():
+            _drop_namespace_cascade(catalog, ns[0])
 
         # Delete the Lakekeeper warehouse
         await _delete_lakekeeper_warehouse(org_db.lakekeeper_warehouse)
@@ -281,3 +425,88 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
 
     else:
         raise ValueError(f"Unsupported DDL operation: {op}")
+
+
+def _write_result(job_id: str, columns: dict[str, list]) -> int:
+    """Write a result set as parquet and return row count."""
+    import os
+    os.makedirs(RESULTS_PATH, exist_ok=True)
+    table = pa.table(columns)
+    pq.write_table(table, os.path.join(RESULTS_PATH, f"{job_id}.parquet"))
+    return table.num_rows
+
+
+async def execute_show(ddl: dict, org_id: str, job_id: str, db: AsyncSession) -> int:
+    """Execute a SHOW command, write results as parquet, return row count."""
+    op = ddl["op"]
+
+    if op == "show_databases":
+        result = await db.execute(
+            select(OrgDatabase.name).where(OrgDatabase.org_id == org_id).order_by(OrgDatabase.name)
+        )
+        names = [row[0] for row in result.all()]
+        return _write_result(job_id, {"database_name": names})
+
+    elif op == "show_schemas":
+        database = ddl["database"]
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        namespaces = catalog.list_namespaces()
+        names = sorted(ns[0] for ns in namespaces)
+        return _write_result(job_id, {"schema_name": names})
+
+    elif op == "show_tables":
+        database = ddl["database"]
+        schema_name = ddl["schema"]
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        tables = catalog.list_tables(schema_name)
+        table_names = sorted(t[1] for t in tables)
+        # Also list views
+        try:
+            views = catalog.list_views(schema_name)
+            view_names = sorted(v[1] for v in views)
+        except Exception:
+            view_names = []
+
+        # Also list views from org_views
+        result = await db.execute(
+            select(OrgView.name).where(
+                OrgView.org_id == org_id,
+                OrgView.database == database,
+                OrgView.schema_name == schema_name,
+            )
+        )
+        org_view_names = sorted(row[0] for row in result.all())
+
+        names = []
+        types = []
+        for n in table_names:
+            names.append(n)
+            types.append("TABLE")
+        all_view_names = sorted(set(view_names) | set(org_view_names))
+        for n in all_view_names:
+            names.append(n)
+            types.append("VIEW")
+        return _write_result(job_id, {"table_name": names, "table_type": types})
+
+    else:
+        raise ValueError(f"Unsupported SHOW operation: {op}")

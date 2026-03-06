@@ -75,12 +75,14 @@ class SessionManager:
         s3_access_key: str,
         s3_secret_key: str,
         s3_region: str,
+        views: list[dict] | None = None,
     ) -> str:
         session_id = uuid.uuid4().hex
         conn, temp_dir = self._new_conn(session_id)
         setup_iceberg_catalog(
             conn, lakekeeper_url, databases,
             s3_endpoint, s3_access_key, s3_secret_key, s3_region,
+            views=views, force_overlay=True,
         )
         return self._register_session(session_id, conn, temp_dir)
 

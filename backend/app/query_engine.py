@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 
 from app.config import (
+    LAKEKEEPER_WORKER_URL,
     MAX_RESULT_ROWS,
     RESULTS_PATH,
     S3_ACCESS_KEY,
@@ -21,9 +22,8 @@ from app.config import (
     WORKER_URL,
 )
 from app.database import async_session
-from app.models import OrgDatabase, QueryJob, WorkerVM
+from app.models import OrgDatabase, OrgView, QueryJob, WorkerVM
 from app.sql_rewriter import rewrite
-from app.warehouse import get_database_catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
 _remote_workers: dict[str, str] = {}  # job_id -> worker IP
@@ -31,23 +31,6 @@ _remote_workers: dict[str, str] = {}  # job_id -> worker IP
 
 def _result_path(job_id: str) -> str:
     return os.path.join(RESULTS_PATH, f"{job_id}.parquet")
-
-
-def _load_iceberg_tables(org_databases: list[OrgDatabase]) -> list[dict]:
-    """Enumerate all tables across all org databases."""
-    tables = []
-    for org_db in org_databases:
-        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
-        for ns in catalog.list_namespaces():
-            schema_name = ns[0]
-            for table_id in catalog.list_tables(schema_name):
-                tables.append({
-                    "database": org_db.name,
-                    "schema": schema_name,
-                    "name": table_id[-1],
-                    "lakekeeper_warehouse": org_db.lakekeeper_warehouse,
-                })
-    return tables
 
 
 async def _update_job(job_id: str, **kwargs):
@@ -64,27 +47,19 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
 
     from app.worker_manager import ensure_worker, wait_for_ready
 
-    # Load org databases and enumerate tables
+    # Load org databases and views
     async with async_session() as session:
         result = await session.execute(
             select(OrgDatabase).where(OrgDatabase.org_id == org_id)
         )
         org_databases = list(result.scalars().all())
-
-    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_databases)
-
-    resolved_objects = []
-    for tbl_info in iceberg_tables:
-        catalog = get_database_catalog(tbl_info["lakekeeper_warehouse"])
-        tbl = await asyncio.to_thread(
-            catalog.load_table, f"{tbl_info['schema']}.{tbl_info['name']}"
+        result = await session.execute(
+            select(OrgView).where(OrgView.org_id == org_id)
         )
-        resolved_objects.append({
-            "duckdb_schema": f"{tbl_info['database']}.{tbl_info['schema']}",
-            "name": tbl_info["name"],
-            "object_type": "table",
-            "metadata_location": tbl.metadata_location,
-        })
+        org_views = list(result.scalars().all())
+
+    databases = [{"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse} for d in org_databases]
+    views = [{"database": v.database, "schema_name": v.schema_name, "name": v.name, "view_sql": v.view_sql} for v in org_views]
 
     # Ensure worker VM is ready
     await _update_job(job_id, status="provisioning")
@@ -105,7 +80,9 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
     payload = {
         "job_id": job_id,
         "sql": sql,
-        "catalog_objects": resolved_objects,
+        "lakekeeper_url": LAKEKEEPER_WORKER_URL,
+        "databases": databases,
+        "views": views,
         "s3": {
             "endpoint": S3_RESULTS_ENDPOINT,
             "access_key": S3_RESULTS_ACCESS_KEY,
@@ -197,28 +174,22 @@ async def _execute_local_worker(job_id: str, sql: str, org_id: str):
             select(OrgDatabase).where(OrgDatabase.org_id == org_id)
         )
         org_databases = list(result.scalars().all())
-
-    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_databases)
-
-    resolved_objects = []
-    for tbl_info in iceberg_tables:
-        catalog = get_database_catalog(tbl_info["lakekeeper_warehouse"])
-        tbl = await asyncio.to_thread(
-            catalog.load_table, f"{tbl_info['schema']}.{tbl_info['name']}"
+        result = await session.execute(
+            select(OrgView).where(OrgView.org_id == org_id)
         )
-        resolved_objects.append({
-            "duckdb_schema": f"{tbl_info['database']}.{tbl_info['schema']}",
-            "name": tbl_info["name"],
-            "object_type": "table",
-            "metadata_location": tbl.metadata_location,
-        })
+        org_views = list(result.scalars().all())
+
+    databases = [{"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse} for d in org_databases]
+    views = [{"database": v.database, "schema_name": v.schema_name, "name": v.name, "view_sql": v.view_sql} for v in org_views]
 
     result_path = _result_path(job_id)
 
     payload = {
         "job_id": job_id,
         "sql": sql,
-        "catalog_objects": resolved_objects,
+        "lakekeeper_url": LAKEKEEPER_WORKER_URL,
+        "databases": databases,
+        "views": views,
         "s3": {
             "endpoint": S3_ENDPOINT,
             "access_key": S3_ACCESS_KEY,
