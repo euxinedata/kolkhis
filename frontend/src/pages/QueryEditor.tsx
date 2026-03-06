@@ -248,14 +248,21 @@ export function QueryEditor() {
     updateTab(tabId, { result: data })
   }
 
-  async function handleSubmit(tabId: number) {
-    const tab = queryTabs.find(t => t.id === tabId)
-    if (!tab || !tab.sql.trim()) return
+  function handlePreview(sql: string) {
+    const id = nextQueryId.current++
+    const tab = newQueryTab(id, `Preview ${id}`, sql)
+    setQueryTabs(prev => [...prev, tab])
+    setActiveQueryTab(id)
+    setActiveCatalogTab(null)
+    submitSql(id, sql)
+  }
+
+  async function submitSql(tabId: number, sql: string) {
     updateTab(tabId, { submitting: true, error: null, result: null, status: null, startedAt: null, elapsed: null })
     try {
       const { job_id } = await apiFetch<{ job_id: string }>('/api/queries', {
         method: 'POST',
-        body: JSON.stringify({ sql: tab.sql }),
+        body: JSON.stringify({ sql }),
       })
       updateTab(tabId, { jobId: job_id, status: 'pending', submitting: false })
       setSearchParams({ job_id })
@@ -263,6 +270,12 @@ export function QueryEditor() {
     } catch (e: unknown) {
       updateTab(tabId, { error: e instanceof Error ? e.message : 'Submit failed', submitting: false })
     }
+  }
+
+  function handleSubmit(tabId: number) {
+    const tab = queryTabs.find(t => t.id === tabId)
+    if (!tab || !tab.sql.trim()) return
+    submitSql(tabId, tab.sql)
   }
 
   async function handleCancel(tabId: number) {
@@ -745,7 +758,7 @@ export function QueryEditor() {
             ) : tab.type === 'schema' ? (
               <SchemaDetail key={tab.id} db={tab.db!} schema={tab.schema!} />
             ) : (
-              <ObjectDetail key={tab.id} db={tab.db!} schema={tab.schema!} name={tab.name!} objectType={tab.objectType!} />
+              <ObjectDetail key={tab.id} db={tab.db!} schema={tab.schema!} name={tab.name!} objectType={tab.objectType!} onPreview={handlePreview} />
             )
           )
         ))}

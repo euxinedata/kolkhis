@@ -493,6 +493,28 @@
 .object-detail-name {
 }
 
+.copy-name-button {
+  background: none;
+  border: 1px solid #444;
+  color: #909090;
+  padding: 0.1em 0.5em;
+  border-radius: 3px;
+  font-size: 0.7em;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.copy-name-button:hover {
+  border-color: #888;
+  color: #ccc;
+}
+
+.tree-col-nullable {
+  text-align: center;
+  font-size: 0.85em;
+  color: #909090;
+}
+
 .object-detail-section {
   margin-bottom: 1em;
 }
@@ -502,10 +524,41 @@
   color: #909090;
 }
 
+.object-detail-stat {
+  display: flex;
+  padding: 0.2em 0;
+  font-size: 0.85em;
+}
+
+.object-detail-stat-label {
+  color: #909090;
+  width: 7em;
+  flex-shrink: 0;
+}
+
+.object-detail-stat-value {
+  color: #c8c8c8;
+}
+
 .catalog-detail-icon {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+}
+
+.preview-button {
+  background: none;
+  border: 1px solid #444;
+  color: #c8c8c8;
+  padding: 0.3em 0.8em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.preview-button:hover {
+  border-color: #888;
+  color: #fff;
 }
 
 .object-detail-sql {

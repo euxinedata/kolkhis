@@ -1,14 +1,40 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api'
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
 interface ColumnInfo {
   name: string
   type: string
   required: boolean
 }
 
+interface PartitionField {
+  name: string
+  transform: string
+}
+
+interface SnapshotInfo {
+  snapshot_id: number
+  timestamp_ms: number
+  operation?: string
+  added_records?: number
+  deleted_records?: number
+}
+
 interface ObjectSchema {
   type: string
+  row_count: number | null
+  total_file_size: number | null
+  total_data_files: number | null
+  last_updated_ms: number | null
+  partition_fields: PartitionField[] | null
+  snapshots: SnapshotInfo[]
   columns: ColumnInfo[]
   sql?: string
 }
@@ -105,9 +131,10 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
   )
 }
 
-export function ObjectDetail({ db, schema, name, objectType }: { db: string; schema: string; name: string; objectType: string }) {
+export function ObjectDetail({ db, schema, name, objectType, onPreview }: { db: string; schema: string; name: string; objectType: string; onPreview?: (sql: string) => void }) {
   const [data, setData] = useState<ObjectSchema | null>(null)
   const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -124,12 +151,70 @@ export function ObjectDetail({ db, schema, name, objectType }: { db: string; sch
     ? { label: 'V', cls: 'tree-icon-view' }
     : { label: 'T', cls: 'tree-icon-table' }
 
+  const qualifiedName = `${db}.${schema}.${name}`
+
+  function handleCopy() {
+    navigator.clipboard.writeText(qualifiedName).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
   return (
     <div className="object-detail">
       <div className="object-detail-header">
         <span className={`tree-type-badge ${badge.cls}`}>{badge.label}</span>
-        <span className="object-detail-name">{db}.{schema}.{name}</span>
+        <span className="object-detail-name">{qualifiedName}</span>
+        <button className="copy-name-button" onClick={handleCopy} title="Copy qualified name">
+          {copied ? 'Copied' : 'Copy'}
+        </button>
       </div>
+      <div className="object-detail-section">
+        {data.row_count !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Rows</span>
+            <span className="object-detail-stat-value">{data.row_count.toLocaleString()}</span>
+          </div>
+        )}
+        {data.total_file_size !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Size</span>
+            <span className="object-detail-stat-value">{formatBytes(data.total_file_size)}</span>
+          </div>
+        )}
+        {data.total_data_files !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Files</span>
+            <span className="object-detail-stat-value">{data.total_data_files.toLocaleString()}</span>
+          </div>
+        )}
+        {data.last_updated_ms !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Last updated</span>
+            <span className="object-detail-stat-value">{new Date(data.last_updated_ms).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'}</span>
+          </div>
+        )}
+        {data.partition_fields && data.partition_fields.length > 0 && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Partitioned by</span>
+            <span className="object-detail-stat-value">
+              {data.partition_fields.map(p =>
+                p.transform === 'identity' ? p.name : `${p.transform}(${p.name})`
+              ).join(', ')}
+            </span>
+          </div>
+        )}
+      </div>
+      {onPreview && (
+        <div className="object-detail-section">
+          <button
+            className="preview-button"
+            onClick={() => onPreview(`SELECT * FROM ${db}.${schema}.${name} LIMIT 100`)}
+          >
+            Preview Data
+          </button>
+        </div>
+      )}
       {data.type === 'view' && data.sql && (
         <pre className="object-detail-sql">{data.sql}</pre>
       )}
@@ -139,6 +224,7 @@ export function ObjectDetail({ db, schema, name, objectType }: { db: string; sch
             <tr>
               <th className="tree-col-name">Column</th>
               <th className="tree-col-type">Type</th>
+              <th className="tree-col-nullable">Nullable</th>
             </tr>
           </thead>
           <tbody>
@@ -146,11 +232,40 @@ export function ObjectDetail({ db, schema, name, objectType }: { db: string; sch
               <tr key={col.name}>
                 <td className="tree-col-name">{col.name}</td>
                 <td className="tree-col-type">{col.type}</td>
+                <td className="tree-col-nullable">{col.required ? 'NO' : 'YES'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {data.snapshots.length > 0 && (
+        <div className="object-detail-section">
+          <span className="object-detail-label">Snapshot history</span>
+          <div className="object-detail-columns">
+            <table>
+              <thead>
+                <tr>
+                  <th className="tree-col-name">Timestamp</th>
+                  <th className="tree-col-type">Operation</th>
+                  <th className="tree-col-type">Records</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.snapshots.map(snap => (
+                  <tr key={snap.snapshot_id}>
+                    <td className="tree-col-name">{new Date(snap.timestamp_ms).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'}</td>
+                    <td className="tree-col-type">{snap.operation ?? '—'}</td>
+                    <td className="tree-col-type">
+                      {snap.added_records !== undefined ? `+${snap.added_records.toLocaleString()}` : ''}
+                      {snap.deleted_records !== undefined ? ` −${snap.deleted_records.toLocaleString()}` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
