@@ -46,14 +46,23 @@ interface CatalogObjectInfo {
   file_size: number | null
 }
 
+interface SchemaInfo {
+  name: string
+  tables: number
+  file_size: number
+}
+
 export function DatabaseDetail({ db }: { db: string }) {
-  const [schemas, setSchemas] = useState<{ name: string }[] | null>(null)
+  const [schemas, setSchemas] = useState<SchemaInfo[] | null>(null)
+  const [totalSize, setTotalSize] = useState<number>(0)
+  const [totalTables, setTotalTables] = useState<number>(0)
+  const [lastUpdatedMs, setLastUpdatedMs] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    apiFetch<{ name: string }[]>(`/api/catalog/databases/${db}/schemas`)
-      .then(d => { setSchemas(d); setLoading(false) })
+    apiFetch<{ schemas: SchemaInfo[]; total_size: number; total_tables: number; last_updated_ms: number | null }>(`/api/catalog/databases/${db}/schemas`)
+      .then(d => { setSchemas(d.schemas); setTotalSize(d.total_size); setTotalTables(d.total_tables); setLastUpdatedMs(d.last_updated_ms); setLoading(false) })
       .catch(() => setLoading(false))
   }, [db])
 
@@ -67,16 +76,43 @@ export function DatabaseDetail({ db }: { db: string }) {
         <span className="object-detail-name">{db}</span>
       </div>
       <div className="object-detail-section">
-        <span className="object-detail-label">{schemas.length} {schemas.length === 1 ? 'schema' : 'schemas'}</span>
+        <div className="object-detail-stat">
+          <span className="object-detail-stat-label">Schemas</span>
+          <span className="object-detail-stat-value">{schemas.length}</span>
+        </div>
+        <div className="object-detail-stat">
+          <span className="object-detail-stat-label">Tables</span>
+          <span className="object-detail-stat-value">{totalTables}</span>
+        </div>
+        {totalSize > 0 && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Total size</span>
+            <span className="object-detail-stat-value">{formatBytes(totalSize)}</span>
+          </div>
+        )}
+        {lastUpdatedMs !== null && (
+          <div className="object-detail-stat">
+            <span className="object-detail-stat-label">Last updated</span>
+            <span className="object-detail-stat-value">{new Date(lastUpdatedMs).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'}</span>
+          </div>
+        )}
       </div>
       <div className="object-detail-columns">
         <table>
           <thead>
-            <tr><th className="tree-col-name">Schema</th></tr>
+            <tr>
+              <th className="tree-col-name">Schema</th>
+              <th className="tree-col-type">Tables</th>
+              <th className="tree-col-type">Size</th>
+            </tr>
           </thead>
           <tbody>
             {schemas.map(s => (
-              <tr key={s.name}><td className="tree-col-name">{s.name}</td></tr>
+              <tr key={s.name}>
+                <td className="tree-col-name">{s.name}</td>
+                <td className="tree-col-type">{s.tables}</td>
+                <td className="tree-col-type">{s.file_size > 0 ? formatBytes(s.file_size) : '—'}</td>
+              </tr>
             ))}
           </tbody>
         </table>

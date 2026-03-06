@@ -51,7 +51,34 @@ async def list_schemas(
     org_db = await _get_org_db(db_name, auth, db)
     catalog = get_database_catalog(org_db.lakekeeper_warehouse)
     namespaces = catalog.list_namespaces()
-    return [{"name": ns[0]} for ns in namespaces]
+    total_size = 0
+    total_tables = 0
+    last_updated_ms = None
+    schemas = []
+    for ns in namespaces:
+        ns_name = ns[0]
+        tables = catalog.list_tables(ns_name)
+        ns_size = 0
+        ns_table_count = len(tables)
+        for t in tables:
+            tbl = catalog.load_table(f"{ns_name}.{t[-1]}")
+            snapshot = tbl.current_snapshot()
+            if snapshot:
+                if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
+                    last_updated_ms = snapshot.timestamp_ms
+                if snapshot.summary:
+                    size = snapshot.summary.get("total-files-size")
+                    if size is not None:
+                        ns_size += int(size)
+        total_size += ns_size
+        total_tables += ns_table_count
+        schemas.append({"name": ns_name, "tables": ns_table_count, "file_size": ns_size})
+    return {
+        "schemas": schemas,
+        "total_size": total_size,
+        "total_tables": total_tables,
+        "last_updated_ms": last_updated_ms,
+    }
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects")

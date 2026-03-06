@@ -84,9 +84,10 @@ class CatalogTreeDataProvider implements TreeDataProvider<CatalogEntry> {
   async loadSchemas(db: string): Promise<void> {
     const existing = this.items[db]
     if (existing?.children && existing.children.length > 0) return
-    const schemas = await apiFetch<{ name: string }[]>(
+    const data = await apiFetch<{ schemas: { name: string }[] }>(
       `/api/catalog/databases/${db}/schemas`
     )
+    const schemas = data.schemas
     for (const s of schemas) {
       const id = `${db}.${s.name}`
       this.items[id] = {
