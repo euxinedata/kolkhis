@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, LAKEKEEPER_URL
+from app.config import S3_ENDPOINT, S3_INTERNAL_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, LAKEKEEPER_URL
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
-from app.models import Organization, OrgMembership, User
+from app.models import OrgDatabase, Organization, OrgMembership, User
 from app.shell import ensure_shell_user
 from app.workspace import ensure_clone
 
@@ -35,8 +35,45 @@ class ApproveMemberRequest(BaseModel):
     user_id: int
 
 
-async def _create_org_storage(org_id: str) -> None:
-    """Create org prefix in shared S3 bucket and register a Lakekeeper warehouse."""
+async def _create_lakekeeper_warehouse(
+    client: httpx.AsyncClient, org_id: str, db_name: str,
+) -> str:
+    """Create a Lakekeeper warehouse for an org database. Returns the warehouse name."""
+    warehouse_name = f"{org_id}-{db_name}"
+    resp = await client.post(
+        f"{LAKEKEEPER_URL}/management/v1/warehouse",
+        headers={
+            "Content-Type": "application/json",
+            "X-Project-Id": "00000000-0000-0000-0000-000000000000",
+        },
+        json={
+            "warehouse-name": warehouse_name,
+            "storage-profile": {
+                "type": "s3",
+                "bucket": S3_BUCKET_NAME,
+                "key-prefix": f"{org_id}/{db_name}",
+                "region": S3_REGION,
+                "flavor": "s3-compat",
+                "endpoint": S3_INTERNAL_ENDPOINT,
+                "path-style-access": True,
+                "sts-enabled": False,
+                "remote-signing-enabled": False,
+            },
+            "storage-credential": {
+                "type": "s3",
+                "credential-type": "access-key",
+                "aws-access-key-id": S3_ACCESS_KEY,
+                "aws-secret-access-key": S3_SECRET_KEY,
+            },
+        },
+    )
+    if resp.status_code not in (201, 409):
+        raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
+    return warehouse_name
+
+
+async def _create_org_storage(org_id: str, db: AsyncSession) -> None:
+    """Create S3 prefix and initial databases for the org."""
     fs = s3fs.S3FileSystem(
         endpoint_url=S3_ENDPOINT,
         key=S3_ACCESS_KEY,
@@ -45,52 +82,12 @@ async def _create_org_storage(org_id: str) -> None:
     )
     await asyncio.to_thread(fs.mkdirs, f"{S3_BUCKET_NAME}/{org_id}", exist_ok=True)
 
-    # Register per-org warehouse in Lakekeeper with key-prefix
+    # Create the 'development' database (Lakekeeper warehouse)
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{LAKEKEEPER_URL}/management/v1/warehouse",
-            headers={
-                "Content-Type": "application/json",
-                "X-Project-Id": "00000000-0000-0000-0000-000000000000",
-            },
-            json={
-                "warehouse-name": org_id,
-                "storage-profile": {
-                    "type": "s3",
-                    "bucket": S3_BUCKET_NAME,
-                    "key-prefix": org_id,
-                    "region": S3_REGION,
-                    "flavor": "s3-compat",
-                    "endpoint": S3_ENDPOINT,
-                    "path-style-access": True,
-                    "sts-enabled": False,
-                    "remote-signing-enabled": False,
-                },
-                "storage-credential": {
-                    "type": "s3",
-                    "credential-type": "access-key",
-                    "aws-access-key-id": S3_ACCESS_KEY,
-                    "aws-secret-access-key": S3_SECRET_KEY,
-                },
-            },
-        )
-        if resp.status_code not in (201, 409):
-            raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
+        warehouse_name = await _create_lakekeeper_warehouse(client, org_id, "development")
 
-        # Create 'default' namespace so dbt works out of the box (profiles.yml uses schema: default)
-        config_resp = await client.get(
-            f"{LAKEKEEPER_URL}/catalog/v1/config",
-            params={"warehouse": org_id},
-        )
-        config_resp.raise_for_status()
-        prefix = config_resp.json().get("defaults", {}).get("prefix", "")
-        if prefix:
-            ns_resp = await client.post(
-                f"{LAKEKEEPER_URL}/catalog/v1/{prefix}/namespaces",
-                json={"namespace": ["default"]},
-            )
-            if ns_resp.status_code not in (200, 409):
-                logger.warning("Failed to create default namespace: %s %s", ns_resp.status_code, ns_resp.text)
+    org_db = OrgDatabase(org_id=org_id, name="development", lakekeeper_warehouse=warehouse_name)
+    db.add(org_db)
 
 
 # dbt + dagster scaffold for the warehouse monorepo
@@ -119,8 +116,8 @@ dispatch:
       type: kolkhis
       backend_url: "{{ env_var('KOLKHIS_BACKEND_URL') }}"
       auth_token: "{{ env_var('KOLKHIS_AUTH_TOKEN') }}"
-      database: warehouse
-      schema: default
+      database: development
+      schema: "dbt_{{ env_var('DBT_USER') }}"
 """,
     ".gitignore": """\
 # Python
@@ -211,7 +208,7 @@ async def create_org(
             message="Initialize warehouse scaffold",
             owner=org.id,
         )
-        await _create_org_storage(org.id)
+        await _create_org_storage(org.id, db)
     except Exception as exc:
         logger.error("Org provisioning failed for %s: %s", org.id, exc)
         raise HTTPException(status_code=502, detail="Failed to provision organization")

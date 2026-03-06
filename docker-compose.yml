@@ -28,7 +28,7 @@ services:
       /bin/sh -c "
       sleep 2 &&
       mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/warehouse &&
+      mc mb --ignore-existing local/pontus-dev-iceberg &&
       exit 0
       "
 
@@ -120,16 +120,6 @@ services:
     depends_on:
       lakekeeper-migrate:
         condition: service_completed_successfully
-
-  lakekeeper-setup:
-    image: curlimages/curl:latest
-    depends_on:
-      lakekeeper:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    entrypoint: ["sh", "-c", "curl -sf -X POST http://lakekeeper:8181/management/v1/warehouse -H 'Content-Type: application/json' -H 'X-Project-Id: 00000000-0000-0000-0000-000000000000' -d '{\"warehouse-name\":\"warehouse\",\"storage-profile\":{\"type\":\"s3\",\"bucket\":\"warehouse\",\"region\":\"us-east-1\",\"flavor\":\"s3-compat\",\"endpoint\":\"http://minio:9000\",\"path-style-access\":true,\"sts-enabled\":false,\"remote-signing-enabled\":false},\"storage-credential\":{\"type\":\"s3\",\"credential-type\":\"access-key\",\"aws-access-key-id\":\"minioadmin\",\"aws-secret-access-key\":\"minioadmin\"}}' || echo 'Warehouse already exists'"]
-    restart: "no"
 
   shell:
     build: ./shell

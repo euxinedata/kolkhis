@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import jwt
 
-from app.config import HOMES_PATH, JWT_SECRET, SHELL_BACKEND_URL, SHELL_SSH_PUBKEY_PATH
+import httpx
+
+from app.config import HOMES_PATH, JWT_SECRET, LAKEKEEPER_URL, SHELL_BACKEND_URL, SHELL_SSH_PUBKEY_PATH
 from app.models import OrgMembership
 
 log = logging.getLogger(__name__)
@@ -144,6 +146,7 @@ def provision_shell_user(org_id: str, shell_username: str, user_id: int = 0, ema
                 "\n# Kolkhis dbt adapter\n"
                 f"export KOLKHIS_AUTH_TOKEN='{token}'\n"
                 f"export KOLKHIS_BACKEND_URL='{SHELL_BACKEND_URL}'\n"
+                f"export DBT_USER='{shell_username.replace('-', '_')}'\n"
             )
         bashrc.write_text(
             "# ~/.bashrc\n"
@@ -197,6 +200,24 @@ async def ensure_shell_user(user_id: int, org_id: str, email: str, db: AsyncSess
         username = f"{username}-{user_id}"[:32]
 
     await asyncio.to_thread(provision_shell_user, org_id, username, user_id, email)
+
+    # Create per-user dbt namespace in the org's development database
+    try:
+        dev_warehouse = f"{org_id}-development"
+        async with httpx.AsyncClient() as client:
+            config_resp = await client.get(
+                f"{LAKEKEEPER_URL}/catalog/v1/config",
+                params={"warehouse": dev_warehouse},
+            )
+            config_resp.raise_for_status()
+            prefix = config_resp.json().get("defaults", {}).get("prefix", "")
+            if prefix:
+                await client.post(
+                    f"{LAKEKEEPER_URL}/catalog/v1/{prefix}/namespaces",
+                    json={"namespace": [f"dbt_{username.replace('-', '_')}"]},
+                )
+    except Exception as exc:
+        log.warning("Failed to create dbt namespace for %s: %s", username, exc)
 
     membership.shell_username = username
     await db.commit()

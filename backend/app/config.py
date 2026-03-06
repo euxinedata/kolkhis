@@ -36,6 +36,8 @@ S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "minioadmin")
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "minioadmin")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "warehouse")
+# S3 endpoint as seen from Lakekeeper (docker-internal); defaults to S3_ENDPOINT
+S3_INTERNAL_ENDPOINT = os.environ.get("S3_INTERNAL_ENDPOINT", S3_ENDPOINT)
 
 
 def is_s3_warehouse() -> bool:
