@@ -111,7 +111,7 @@ def _create_namespace_aliases(
                 try:
                     conn.execute(
                         f'CREATE VIEW "{db_name}"."{schema_name}"."{tbl_name}" AS '
-                        f'SELECT * FROM "{warehouse}"."{iceberg_schema}"."{tbl_name}"'
+                        f'SELECT * FROM {warehouse}."{iceberg_schema}"."{tbl_name}"'
                     )
                 except duckdb.Error as exc:
                     logger.warning("Failed to create alias view %s.%s.%s: %s", db_name, schema_name, tbl_name, exc)
@@ -149,9 +149,10 @@ def setup_iceberg_catalog(
     """)
 
     catalog_endpoint = f"{lakekeeper_url}/catalog"
-    # Quote the alias since warehouse is a UUID with dashes
+    # Attach the Iceberg catalog as "warehouse" so dbt profiles.yml
+    # can use database: warehouse regardless of the org UUID.
     conn.execute(f"""
-        ATTACH '{warehouse}' AS "{warehouse}" (
+        ATTACH '{warehouse}' AS warehouse (
             TYPE ICEBERG,
             ENDPOINT '{catalog_endpoint}',
             AUTHORIZATION_TYPE 'none',
@@ -161,7 +162,7 @@ def setup_iceberg_catalog(
 
     # Create alias views so nested namespaces like retail.products.brands
     # work the same way as in the SQL Query workbook (database.schema.table).
-    _create_namespace_aliases(conn, catalog_endpoint, warehouse)
+    _create_namespace_aliases(conn, catalog_endpoint, "warehouse")
 
 
 def setup_connection(
