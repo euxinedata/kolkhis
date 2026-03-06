@@ -70,7 +70,7 @@ class SessionManager:
     def create_iceberg(
         self,
         lakekeeper_url: str,
-        warehouse: str,
+        databases: list[dict],
         s3_endpoint: str,
         s3_access_key: str,
         s3_secret_key: str,
@@ -79,7 +79,7 @@ class SessionManager:
         session_id = uuid.uuid4().hex
         conn, temp_dir = self._new_conn(session_id)
         setup_iceberg_catalog(
-            conn, lakekeeper_url, warehouse,
+            conn, lakekeeper_url, databases,
             s3_endpoint, s3_access_key, s3_secret_key, s3_region,
         )
         return self._register_session(session_id, conn, temp_dir)

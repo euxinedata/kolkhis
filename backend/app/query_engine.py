@@ -21,9 +21,9 @@ from app.config import (
     WORKER_URL,
 )
 from app.database import async_session
-from app.models import QueryJob, WorkerVM
+from app.models import OrgDatabase, QueryJob, WorkerVM
 from app.sql_rewriter import rewrite
-from app.warehouse import get_org_catalog
+from app.warehouse import get_database_catalog
 
 _running_tasks: dict[str, asyncio.Task] = {}
 _remote_workers: dict[str, str] = {}  # job_id -> worker IP
@@ -33,20 +33,19 @@ def _result_path(job_id: str) -> str:
     return os.path.join(RESULTS_PATH, f"{job_id}.parquet")
 
 
-def _load_iceberg_tables(org_id: str) -> list[dict]:
-    """Enumerate all tables from the org's PyIceberg catalog."""
-    catalog = get_org_catalog(org_id)
+def _load_iceberg_tables(org_databases: list[OrgDatabase]) -> list[dict]:
+    """Enumerate all tables across all org databases."""
     tables = []
-    for top_ns in catalog.list_namespaces():
-        db_name = top_ns[0]
-        for child_ns in catalog.list_namespaces(top_ns):
-            schema_name = child_ns[-1]
-            for table_id in catalog.list_tables(f"{db_name}.{schema_name}"):
+    for org_db in org_databases:
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        for ns in catalog.list_namespaces():
+            schema_name = ns[0]
+            for table_id in catalog.list_tables(schema_name):
                 tables.append({
-                    "database": db_name,
+                    "database": org_db.name,
                     "schema": schema_name,
                     "name": table_id[-1],
-                    "iceberg_id": f"{db_name}.{schema_name}.{table_id[-1]}",
+                    "lakekeeper_warehouse": org_db.lakekeeper_warehouse,
                 })
     return tables
 
@@ -65,13 +64,21 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
 
     from app.worker_manager import ensure_worker, wait_for_ready
 
-    # Enumerate tables from org's Iceberg catalog and resolve metadata locations
-    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_id)
-    catalog = get_org_catalog(org_id)
+    # Load org databases and enumerate tables
+    async with async_session() as session:
+        result = await session.execute(
+            select(OrgDatabase).where(OrgDatabase.org_id == org_id)
+        )
+        org_databases = list(result.scalars().all())
+
+    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_databases)
 
     resolved_objects = []
     for tbl_info in iceberg_tables:
-        tbl = await asyncio.to_thread(catalog.load_table, tbl_info["iceberg_id"])
+        catalog = get_database_catalog(tbl_info["lakekeeper_warehouse"])
+        tbl = await asyncio.to_thread(
+            catalog.load_table, f"{tbl_info['schema']}.{tbl_info['name']}"
+        )
         resolved_objects.append({
             "duckdb_schema": f"{tbl_info['database']}.{tbl_info['schema']}",
             "name": tbl_info["name"],
@@ -185,12 +192,20 @@ async def _execute_local_worker(job_id: str, sql: str, org_id: str):
     """Execute a query on a locally-running worker over HTTP."""
     import httpx
 
-    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_id)
-    catalog = get_org_catalog(org_id)
+    async with async_session() as session:
+        result = await session.execute(
+            select(OrgDatabase).where(OrgDatabase.org_id == org_id)
+        )
+        org_databases = list(result.scalars().all())
+
+    iceberg_tables = await asyncio.to_thread(_load_iceberg_tables, org_databases)
 
     resolved_objects = []
     for tbl_info in iceberg_tables:
-        tbl = await asyncio.to_thread(catalog.load_table, tbl_info["iceberg_id"])
+        catalog = get_database_catalog(tbl_info["lakekeeper_warehouse"])
+        tbl = await asyncio.to_thread(
+            catalog.load_table, f"{tbl_info['schema']}.{tbl_info['name']}"
+        )
         resolved_objects.append({
             "duckdb_schema": f"{tbl_info['database']}.{tbl_info['schema']}",
             "name": tbl_info["name"],

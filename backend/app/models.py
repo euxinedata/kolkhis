@@ -130,6 +130,17 @@ class BillingPeriod(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class OrgDatabase(Base):
+    __tablename__ = "org_databases"
+    __table_args__ = (UniqueConstraint("org_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    lakekeeper_warehouse: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ShellProvision(Base):
     __tablename__ = "shell_provisions"
 

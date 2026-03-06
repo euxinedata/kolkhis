@@ -5,7 +5,6 @@ import shutil
 import tempfile
 
 import duckdb
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -22,118 +21,21 @@ def cancel(job_id: str) -> bool:
     return True
 
 
-def _create_namespace_aliases(
-    conn: duckdb.DuckDBPyConnection,
-    catalog_endpoint: str,
-    warehouse: str,
-    catalog_alias: str,
-) -> None:
-    """Create in-memory alias databases/schemas so nested Iceberg namespaces
-    like retail.products can be queried as retail.products.table_name
-    (database.schema.table), matching the SQL Query workbook convention.
-
-    ``warehouse`` is the Lakekeeper warehouse name (org UUID) used for API calls.
-    ``catalog_alias`` is the DuckDB ATTACH alias used in CREATE VIEW statements.
-    """
-    # Get the catalog prefix from the REST config endpoint
-    try:
-        resp = httpx.get(f"{catalog_endpoint}/v1/config", params={"warehouse": warehouse}, timeout=10)
-        resp.raise_for_status()
-        prefix = resp.json().get("defaults", {}).get("prefix", "")
-    except Exception as exc:
-        logger.warning("Failed to get catalog config for aliases: %s", exc)
-        return
-
-    if not prefix:
-        return
-
-    # Enumerate all top-level namespaces
-    try:
-        resp = httpx.get(f"{catalog_endpoint}/v1/{prefix}/namespaces", timeout=10)
-        resp.raise_for_status()
-        top_namespaces = [ns[0] for ns in resp.json().get("namespaces", []) if len(ns) == 1]
-    except Exception as exc:
-        logger.warning("Failed to list namespaces: %s", exc)
-        return
-
-    created_dbs: set[str] = set()
-
-    for top_ns in top_namespaces:
-        # Check for nested namespaces under this one
-        try:
-            resp = httpx.get(
-                f"{catalog_endpoint}/v1/{prefix}/namespaces",
-                params={"parent": top_ns},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            nested = resp.json().get("namespaces", [])
-        except Exception:
-            continue
-
-        for ns_parts in nested:
-            if len(ns_parts) < 2:
-                continue
-            db_name = ns_parts[0]
-            schema_name = ns_parts[1]
-            iceberg_schema = ".".join(ns_parts)  # e.g. "retail.products"
-
-            # Create in-memory database for the top-level namespace
-            if db_name not in created_dbs:
-                try:
-                    conn.execute(f'ATTACH \':memory:\' AS "{db_name}"')
-                    created_dbs.add(db_name)
-                    logger.info("Created alias database: %s", db_name)
-                except duckdb.Error as exc:
-                    logger.warning("Failed to create alias database %s: %s", db_name, exc)
-
-            if db_name not in created_dbs:
-                continue
-
-            # Create schema
-            try:
-                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_name}"."{schema_name}"')
-            except duckdb.Error as exc:
-                logger.warning("Failed to create alias schema %s.%s: %s", db_name, schema_name, exc)
-                continue
-
-            # List tables in this namespace via Lakekeeper REST API
-            # Namespace separator in Iceberg REST is %1F (unit separator)
-            ns_path = "%1F".join(ns_parts)
-            try:
-                resp = httpx.get(
-                    f"{catalog_endpoint}/v1/{prefix}/namespaces/{ns_path}/tables",
-                    timeout=10,
-                )
-                resp.raise_for_status()
-                tables = resp.json().get("identifiers", [])
-            except Exception as exc:
-                logger.warning("Failed to list tables in %s: %s", iceberg_schema, exc)
-                continue
-
-            for tbl in tables:
-                tbl_name = tbl["name"]
-                try:
-                    conn.execute(
-                        f'CREATE VIEW "{db_name}"."{schema_name}"."{tbl_name}" AS '
-                        f'SELECT * FROM {catalog_alias}."{iceberg_schema}"."{tbl_name}"'
-                    )
-                except duckdb.Error as exc:
-                    logger.warning("Failed to create alias view %s.%s.%s: %s", db_name, schema_name, tbl_name, exc)
-
-    logger.info("Namespace alias creation complete")
-
-
 def setup_iceberg_catalog(
     conn: duckdb.DuckDBPyConnection,
     lakekeeper_url: str,
-    warehouse: str,
+    databases: list[dict],
     s3_endpoint: str,
     s3_access_key: str,
     s3_secret_key: str,
     s3_region: str,
 ) -> None:
-    """ATTACH an Iceberg REST catalog for full DDL/DML support."""
+    """ATTACH Iceberg REST catalogs — one per database.
+
+    Each entry in ``databases`` has ``name`` (logical DB name, e.g. "development")
+    and ``lakekeeper_warehouse`` (the Lakekeeper warehouse identifier).
+    DuckDB ATTACHes each as ``name``, giving native database.schema.table access.
+    """
     conn.install_extension("iceberg")
     conn.load_extension("iceberg")
     conn.install_extension("httpfs")
@@ -154,20 +56,16 @@ def setup_iceberg_catalog(
     """)
 
     catalog_endpoint = f"{lakekeeper_url}/catalog"
-    # Attach the Iceberg catalog as "warehouse" so dbt profiles.yml
-    # can use database: warehouse regardless of the org UUID.
-    conn.execute(f"""
-        ATTACH '{warehouse}' AS warehouse (
-            TYPE ICEBERG,
-            ENDPOINT '{catalog_endpoint}',
-            AUTHORIZATION_TYPE 'none',
-            ACCESS_DELEGATION_MODE 'none'
-        )
-    """)
-
-    # Create alias views so nested namespaces like retail.products.brands
-    # work the same way as in the SQL Query workbook (database.schema.table).
-    _create_namespace_aliases(conn, catalog_endpoint, warehouse, "warehouse")
+    for db in databases:
+        conn.execute(f"""
+            ATTACH '{db["lakekeeper_warehouse"]}' AS "{db["name"]}" (
+                TYPE ICEBERG,
+                ENDPOINT '{catalog_endpoint}',
+                AUTHORIZATION_TYPE 'none',
+                ACCESS_DELEGATION_MODE 'none'
+            )
+        """)
+        logger.info("Attached database: %s -> %s", db["name"], db["lakekeeper_warehouse"])
 
 
 def setup_connection(
@@ -198,12 +96,8 @@ def setup_connection(
         )
     """)
 
-    # Always create the default 'kolkhis' database for dbt target writes
-    conn.execute('ATTACH \':memory:\' AS "kolkhis"')
-    conn.execute('CREATE SCHEMA IF NOT EXISTS "kolkhis"."main"')
-
-    created_dbs: set[str] = {"kolkhis"}
-    created_schemas: set[str] = {'"kolkhis"."main"'}
+    created_dbs: set[str] = set()
+    created_schemas: set[str] = set()
     sorted_objects = sorted(
         catalog_objects, key=lambda o: 0 if o["object_type"] == "table" else 1
     )

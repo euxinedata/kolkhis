@@ -78,7 +78,7 @@ export function SchemaDetail({ db, schema }: { db: string; schema: string }) {
     <div className="object-detail">
       <div className="object-detail-header">
         <img className="catalog-detail-icon" src="/file-icons/folder-blue.svg" alt="" />
-        <span className="object-detail-name">{db}.{schema}</span>
+        <span className="object-detail-name">{schema}</span>
       </div>
       <div className="object-detail-section">
         <span className="object-detail-label">{tables.length} {tables.length === 1 ? 'table' : 'tables'}, {views.length} {views.length === 1 ? 'view' : 'views'}</span>

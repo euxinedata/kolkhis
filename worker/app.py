@@ -170,9 +170,14 @@ class CreateSessionRequest(BaseModel):
     s3: SessionS3Config
 
 
+class DatabaseInfo(BaseModel):
+    name: str
+    lakekeeper_warehouse: str
+
+
 class CreateIcebergSessionRequest(BaseModel):
     lakekeeper_url: str
-    warehouse: str
+    databases: list[DatabaseInfo]
     s3: SessionS3Config
 
 
@@ -210,7 +215,7 @@ async def create_iceberg_session(req: CreateIcebergSessionRequest, _auth: Authen
         None,
         session_manager.create_iceberg,
         req.lakekeeper_url,
-        req.warehouse,
+        [db.model_dump() for db in req.databases],
         req.s3.endpoint,
         req.s3.access_key,
         req.s3.secret_key,

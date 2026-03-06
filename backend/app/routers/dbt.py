@@ -3,6 +3,8 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.config import (
@@ -15,6 +17,8 @@ from app.config import (
     WORKER_MODE,
     WORKER_URL,
 )
+from app.database import get_db
+from app.models import OrgDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,7 @@ class SessionQueryRequest(BaseModel):
 @router.post("/session")
 async def create_session(
     user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
 ):
     user_id = int(user["sub"])
 
@@ -80,11 +85,21 @@ async def create_session(
     if not org_id:
         raise HTTPException(status_code=400, detail="No active organization")
 
+    # Look up org databases
+    result = await db.execute(
+        select(OrgDatabase).where(OrgDatabase.org_id == org_id)
+    )
+    org_databases = result.scalars().all()
+    databases = [
+        {"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse}
+        for d in org_databases
+    ]
+
     worker_url = await _get_worker_url(user_id)
 
     payload = {
         "lakekeeper_url": LAKEKEEPER_WORKER_URL,
-        "warehouse": org_id,
+        "databases": databases,
         "s3": {
             "endpoint": S3_ENDPOINT,
             "access_key": S3_ACCESS_KEY,
