@@ -27,3 +27,6 @@ dependencies = [
     "uvicorn[standard]>=0.41.0",
     "asyncssh>=2.21.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]

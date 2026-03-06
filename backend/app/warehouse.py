@@ -19,3 +19,8 @@ def get_database_catalog(lakekeeper_warehouse: str) -> RestCatalog:
             "s3.region": S3_REGION,
         },
     )
+
+
+def invalidate_catalog_cache() -> None:
+    """Clear all cached RestCatalog entries (e.g. after warehouse create/delete)."""
+    get_database_catalog.cache_clear()

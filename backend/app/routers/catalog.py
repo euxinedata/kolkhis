@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.database import get_db
-from app.models import OrgDatabase
+from app.models import OrgDatabase, OrgView
 from app.warehouse import get_database_catalog
 
 router = APIRouter(prefix="/api/catalog")
@@ -108,6 +108,21 @@ async def list_objects(
                     file_size = int(size)
                     total_size += file_size
         result.append({"name": t[-1], "type": "table", "columns": col_count, "file_size": file_size})
+
+    # Include views from org_views
+    org_id = auth.get("org_id")
+    view_result = await db.execute(
+        select(OrgView).where(
+            OrgView.org_id == org_id,
+            OrgView.database == db_name,
+            OrgView.schema_name == schema_name,
+        )
+    )
+    table_names = {t[-1] for t in tables}
+    for v in view_result.scalars().all():
+        if v.name not in table_names:
+            result.append({"name": v.name, "type": "view", "columns": None, "file_size": None})
+
     return {"objects": result, "total_size": total_size, "last_updated_ms": last_updated_ms}
 
 
@@ -123,8 +138,31 @@ async def get_object_schema(
     catalog = get_database_catalog(org_db.lakekeeper_warehouse)
     try:
         tbl = catalog.load_table(f"{schema_name}.{obj_name}")
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except Exception:
+        # Check if it's a view in org_views
+        org_id = auth.get("org_id")
+        view_result = await db.execute(
+            select(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == db_name,
+                OrgView.schema_name == schema_name,
+                OrgView.name == obj_name,
+            )
+        )
+        view = view_result.scalar_one_or_none()
+        if view is None:
+            raise HTTPException(status_code=404, detail=f"Object '{db_name}.{schema_name}.{obj_name}' not found")
+        return {
+            "type": "view",
+            "view_sql": view.view_sql,
+            "row_count": None,
+            "total_file_size": None,
+            "total_data_files": None,
+            "last_updated_ms": None,
+            "partition_fields": None,
+            "snapshots": [],
+            "columns": [],
+        }
 
     row_count = None
     total_file_size = None
