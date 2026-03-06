@@ -15,7 +15,7 @@ from app.config import (
     S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION,
 )
 from app.models import OrgDatabase, OrgView
-from app.warehouse import get_database_catalog
+from app.warehouse import get_database_catalog, invalidate_catalog_cache
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,24 @@ _CREATE_SCHEMA_BAD_QUOTES_RE = re.compile(
 )
 _DROP_BAD_QUOTES_RE = re.compile(
     r"^\s*DROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?.*'.*$",
+    re.IGNORECASE,
+)
+
+# ALTER ... RENAME TO patterns
+_ALTER_DATABASE_RENAME_RE = re.compile(
+    rf"^\s*ALTER\s+DATABASE\s+{_IDENT}\s+RENAME\s+TO\s+{_IDENT}\s*;?\s*$",
+    re.IGNORECASE,
+)
+_ALTER_SCHEMA_RENAME_RE = re.compile(
+    rf"^\s*ALTER\s+SCHEMA\s+{_IDENT}\.{_IDENT}\s+RENAME\s+TO\s+{_IDENT}\s*;?\s*$",
+    re.IGNORECASE,
+)
+_ALTER_TABLE_RENAME_RE = re.compile(
+    rf"^\s*ALTER\s+TABLE\s+{_IDENT}\.{_IDENT}\.{_IDENT}\s+RENAME\s+TO\s+{_IDENT}\s*;?\s*$",
+    re.IGNORECASE,
+)
+_ALTER_VIEW_RENAME_RE = re.compile(
+    rf"^\s*ALTER\s+VIEW\s+{_IDENT}\.{_IDENT}\.{_IDENT}\s+RENAME\s+TO\s+{_IDENT}\s*;?\s*$",
     re.IGNORECASE,
 )
 
@@ -119,6 +137,23 @@ def detect_ddl(sql: str) -> dict | None:
     m = _SHOW_TABLES_RE.match(sql)
     if m:
         return {"op": "show_tables", "database": _extract_ident(m, 1), "schema": _extract_ident(m, 3)}
+
+    # ALTER ... RENAME TO
+    m = _ALTER_DATABASE_RENAME_RE.match(sql)
+    if m:
+        return {"op": "rename_database", "name": _extract_ident(m, 1), "new_name": _extract_ident(m, 3)}
+
+    m = _ALTER_SCHEMA_RENAME_RE.match(sql)
+    if m:
+        return {"op": "rename_schema", "database": _extract_ident(m, 1), "name": _extract_ident(m, 3), "new_name": _extract_ident(m, 5)}
+
+    m = _ALTER_TABLE_RENAME_RE.match(sql)
+    if m:
+        return {"op": "rename_table", "database": _extract_ident(m, 1), "schema": _extract_ident(m, 3), "name": _extract_ident(m, 5), "new_name": _extract_ident(m, 7)}
+
+    m = _ALTER_VIEW_RENAME_RE.match(sql)
+    if m:
+        return {"op": "rename_view", "database": _extract_ident(m, 1), "schema": _extract_ident(m, 3), "name": _extract_ident(m, 5), "new_name": _extract_ident(m, 7)}
 
     m = _CREATE_VIEW_RE.match(sql)
     if m:
@@ -189,6 +224,39 @@ async def _create_lakekeeper_warehouse(org_id: str, db_name: str) -> str:
     return warehouse_name
 
 
+async def _rename_lakekeeper_warehouse(warehouse_name: str, new_warehouse_name: str) -> None:
+    """Rename a Lakekeeper warehouse."""
+    headers = {
+        "Content-Type": "application/json",
+        "X-Project-Id": "00000000-0000-0000-0000-000000000000",
+    }
+    async with httpx.AsyncClient() as client:
+        # Look up warehouse ID by name
+        resp = await client.get(
+            f"{LAKEKEEPER_URL}/management/v1/warehouse",
+            params={"warehouse-name": warehouse_name},
+            headers=headers,
+        )
+        if resp.status_code != 200:
+            raise Exception(f"Failed to list warehouses: {resp.status_code} {resp.text}")
+        warehouses = resp.json().get("warehouses", [])
+        match = next((w for w in warehouses if w["name"] == warehouse_name), None)
+        if match is None:
+            raise ValueError(f"Lakekeeper warehouse '{warehouse_name}' not found")
+        warehouse_id = match["warehouse-id"]
+
+        # Rename
+        resp = await client.post(
+            f"{LAKEKEEPER_URL}/management/v1/warehouse/{warehouse_id}/rename",
+            json={"new-name": new_warehouse_name},
+            headers=headers,
+        )
+        if resp.status_code == 409:
+            raise ValueError(f"Warehouse '{new_warehouse_name}' already exists")
+        if resp.status_code not in (200, 204):
+            raise Exception(f"Failed to rename warehouse: {resp.status_code} {resp.text}")
+
+
 async def _delete_lakekeeper_warehouse(warehouse_name: str) -> None:
     """Delete a Lakekeeper warehouse by name."""
     headers = {
@@ -248,6 +316,7 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
             raise ValueError(f"Database '{name}' already exists")
 
         warehouse_name = await _create_lakekeeper_warehouse(org_id, name)
+        invalidate_catalog_cache()
         org_db = OrgDatabase(org_id=org_id, name=name, lakekeeper_warehouse=warehouse_name)
         db.add(org_db)
         await db.commit()
@@ -394,6 +463,139 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
         _drop_namespace_cascade(catalog, schema_name)
         return f"Schema '{database}.{schema_name}' dropped"
 
+    elif op == "rename_view":
+        database = ddl["database"]
+        schema_name = ddl["schema"]
+        old_name = ddl["name"]
+        new_name = ddl["new_name"]
+        result = await db.execute(
+            select(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == database,
+                OrgView.schema_name == schema_name,
+                OrgView.name == old_name,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            raise ValueError(f"View '{database}.{schema_name}.{old_name}' not found")
+        existing.name = new_name
+        await db.commit()
+        return f"View '{database}.{schema_name}.{old_name}' renamed to '{new_name}'"
+
+    elif op == "rename_table":
+        database = ddl["database"]
+        schema_name = ddl["schema"]
+        old_name = ddl["name"]
+        new_name = ddl["new_name"]
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        from_id = f"{schema_name}.{old_name}"
+        to_id = f"{schema_name}.{new_name}"
+        try:
+            catalog.rename_table(from_id, to_id)
+        except NoSuchTableError:
+            raise ValueError(f"Table '{database}.{from_id}' not found")
+        return f"Table '{database}.{from_id}' renamed to '{new_name}'"
+
+    elif op == "rename_schema":
+        database = ddl["database"]
+        old_name = ddl["name"]
+        new_name = ddl["new_name"]
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == database,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{database}' not found")
+
+        catalog = get_database_catalog(org_db.lakekeeper_warehouse)
+        if not catalog.namespace_exists(old_name):
+            raise ValueError(f"Schema '{database}.{old_name}' not found")
+
+        # Create new namespace
+        catalog.create_namespace(new_name)
+
+        # Move all tables
+        for table_id in catalog.list_tables(old_name):
+            catalog.rename_table(
+                f"{old_name}.{table_id[1]}",
+                f"{new_name}.{table_id[1]}",
+            )
+
+        # Move org_views
+        from sqlalchemy import update
+        await db.execute(
+            update(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == database,
+                OrgView.schema_name == old_name,
+            ).values(schema_name=new_name)
+        )
+        await db.commit()
+
+        # Drop old namespace (should be empty now)
+        catalog.drop_namespace(old_name)
+        return f"Schema '{database}.{old_name}' renamed to '{new_name}'"
+
+    elif op == "rename_database":
+        old_name = ddl["name"]
+        new_name = ddl["new_name"]
+
+        # Check source exists
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == old_name,
+            )
+        )
+        org_db = result.scalar_one_or_none()
+        if org_db is None:
+            raise ValueError(f"Database '{old_name}' not found")
+
+        # Check target doesn't exist
+        result = await db.execute(
+            select(OrgDatabase).where(
+                OrgDatabase.org_id == org_id,
+                OrgDatabase.name == new_name,
+            )
+        )
+        if result.scalar_one_or_none() is not None:
+            raise ValueError(f"Database '{new_name}' already exists")
+
+        # Rename Lakekeeper warehouse
+        old_warehouse = org_db.lakekeeper_warehouse
+        new_warehouse = f"{org_id}-{new_name}"
+        await _rename_lakekeeper_warehouse(old_warehouse, new_warehouse)
+        invalidate_catalog_cache()
+
+        # Update OrgDatabase record
+        org_db.name = new_name
+        org_db.lakekeeper_warehouse = new_warehouse
+
+        # Update org_views that reference this database
+        from sqlalchemy import update
+        await db.execute(
+            update(OrgView).where(
+                OrgView.org_id == org_id,
+                OrgView.database == old_name,
+            ).values(database=new_name)
+        )
+        await db.commit()
+        return f"Database '{old_name}' renamed to '{new_name}'"
+
     elif op == "drop_database":
         name = ddl["name"]
         result = await db.execute(
@@ -413,6 +615,7 @@ async def execute_ddl(ddl: dict, org_id: str, db: AsyncSession) -> str:
 
         # Delete the Lakekeeper warehouse
         await _delete_lakekeeper_warehouse(org_db.lakekeeper_warehouse)
+        invalidate_catalog_cache()
         # Remove OrgDatabase record
         await db.execute(
             delete(OrgDatabase).where(

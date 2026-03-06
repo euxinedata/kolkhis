@@ -124,6 +124,55 @@ class TestDetectDdlReturnShapes:
         result = detect_ddl("CREATE VIEW dev.s.v AS (SELECT 1)")
         assert result["view_sql"] == "(SELECT 1)"
 
+    # ALTER ... RENAME TO
+    def test_rename_database_shape(self):
+        result = detect_ddl("ALTER DATABASE mydb RENAME TO newdb")
+        assert result == {"op": "rename_database", "name": "mydb", "new_name": "newdb"}
+
+    def test_rename_database_quoted(self):
+        result = detect_ddl('ALTER DATABASE "mydb" RENAME TO "newdb"')
+        assert result == {"op": "rename_database", "name": "mydb", "new_name": "newdb"}
+
+    def test_rename_schema_shape(self):
+        result = detect_ddl("ALTER SCHEMA dev.myschema RENAME TO newschema")
+        assert result == {"op": "rename_schema", "database": "dev", "name": "myschema", "new_name": "newschema"}
+
+    def test_rename_schema_quoted(self):
+        result = detect_ddl('ALTER SCHEMA "dev"."myschema" RENAME TO "newschema"')
+        assert result == {"op": "rename_schema", "database": "dev", "name": "myschema", "new_name": "newschema"}
+
+    def test_rename_table_shape(self):
+        result = detect_ddl("ALTER TABLE dev.myschema.mytable RENAME TO newtable")
+        assert result == {
+            "op": "rename_table", "database": "dev", "schema": "myschema",
+            "name": "mytable", "new_name": "newtable",
+        }
+
+    def test_rename_table_quoted(self):
+        result = detect_ddl('ALTER TABLE "dev"."myschema"."mytable" RENAME TO "newtable"')
+        assert result["op"] == "rename_table"
+        assert result["name"] == "mytable"
+        assert result["new_name"] == "newtable"
+
+    def test_rename_view_shape(self):
+        result = detect_ddl("ALTER VIEW dev.myschema.myview RENAME TO newview")
+        assert result == {
+            "op": "rename_view", "database": "dev", "schema": "myschema",
+            "name": "myview", "new_name": "newview",
+        }
+
+    def test_rename_view_quoted(self):
+        result = detect_ddl('ALTER VIEW "dev"."myschema"."myview" RENAME TO "newview"')
+        assert result["op"] == "rename_view"
+        assert result["name"] == "myview"
+        assert result["new_name"] == "newview"
+
+    def test_rename_case_insensitive(self):
+        result = detect_ddl("alter database MyDb rename to NewDb")
+        assert result["op"] == "rename_database"
+        assert result["name"] == "MyDb"
+        assert result["new_name"] == "NewDb"
+
     def test_non_ddl_returns_none(self):
         assert detect_ddl("SELECT 1") is None
 

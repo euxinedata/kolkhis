@@ -99,6 +99,17 @@ async def create_query(
             db.add(job)
             await db.commit()
             raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("DDL execution failed for: %s", body.sql)
+            job = QueryJob(
+                id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                status="failed", error=str(e),
+                started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
+            )
+            db.add(job)
+            await db.commit()
+            raise HTTPException(status_code=500, detail=f"DDL execution failed: {e}")
 
     job_id = str(uuid.uuid4())
     job = QueryJob(id=job_id, user_id=int(user["sub"]), sql=body.sql, status="pending")
