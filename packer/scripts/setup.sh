@@ -38,9 +38,8 @@ uv pip install --python .venv/bin/python \
 import duckdb
 conn = duckdb.connect()
 conn.execute(\"SET home_directory='/opt/kolkhis-worker'\")
-conn.install_extension('avro')
-conn.install_extension('iceberg')
-conn.load_extension('iceberg')
+conn.install_extension('ducklake')
+conn.install_extension('postgres')
 conn.install_extension('httpfs')
 conn.close()
 "
