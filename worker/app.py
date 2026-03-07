@@ -59,34 +59,19 @@ class S3Config(BaseModel):
     result_path: str
 
 
-class CatalogObject(BaseModel):
-    duckdb_schema: str
-    name: str
-    object_type: str
-    metadata_location: str | None = None
-    view_sql: str | None = None
-
-
 class DatabaseInfo(BaseModel):
     name: str
-    lakekeeper_warehouse: str
-
-
-class ViewInfo(BaseModel):
-    database: str
-    schema_name: str
-    name: str
-    view_sql: str
+    data_path: str
+    metadata_schema: str
 
 
 class QueryRequest(BaseModel):
     job_id: str
     sql: str
-    lakekeeper_url: str
+    pg_connection_string: str
     databases: list[DatabaseInfo]
     s3: S3Config
     max_result_rows: int = 100000
-    views: list[ViewInfo] = []
 
 
 class QuerySubmitResponse(BaseModel):
@@ -118,13 +103,12 @@ async def submit_query(req: QueryRequest, _auth: Authenticated):
         raise HTTPException(status_code=409, detail="Job already exists")
 
     loop = asyncio.get_running_loop()
-    views = [v.model_dump() for v in req.views] if req.views else None
     task = loop.run_in_executor(
         None,
         execute_query,
         req.job_id,
         req.sql,
-        req.lakekeeper_url,
+        req.pg_connection_string,
         [db.model_dump() for db in req.databases],
         req.s3.endpoint,
         req.s3.access_key,
@@ -132,7 +116,6 @@ async def submit_query(req: QueryRequest, _auth: Authenticated):
         req.s3.region,
         req.s3.result_path,
         req.max_result_rows,
-        views,
     )
 
     _jobs[req.job_id] = {"status": "running", "row_count": None, "error": None}
@@ -182,16 +165,10 @@ class SessionS3Config(BaseModel):
     region: str
 
 
-class CreateSessionRequest(BaseModel):
-    catalog_objects: list[CatalogObject]
-    s3: SessionS3Config
-
-
-class CreateIcebergSessionRequest(BaseModel):
-    lakekeeper_url: str
+class CreateDuckLakeSessionRequest(BaseModel):
+    pg_connection_string: str
     databases: list[DatabaseInfo]
     s3: SessionS3Config
-    views: list[ViewInfo] = []
 
 
 class SessionQueryRequest(BaseModel):
@@ -206,35 +183,18 @@ class ExportArrowRequest(BaseModel):
 # --- Session endpoints ---
 
 
-@app.post("/session")
-async def create_session(req: CreateSessionRequest, _auth: Authenticated):
+@app.post("/session/ducklake")
+async def create_ducklake_session(req: CreateDuckLakeSessionRequest, _auth: Authenticated):
     loop = asyncio.get_running_loop()
     session_id = await loop.run_in_executor(
         None,
-        session_manager.create,
-        [obj.model_dump() for obj in req.catalog_objects],
-        req.s3.endpoint,
-        req.s3.access_key,
-        req.s3.secret_key,
-        req.s3.region,
-    )
-    return {"session_id": session_id}
-
-
-@app.post("/session/iceberg")
-async def create_iceberg_session(req: CreateIcebergSessionRequest, _auth: Authenticated):
-    loop = asyncio.get_running_loop()
-    views = [v.model_dump() for v in req.views] if req.views else None
-    session_id = await loop.run_in_executor(
-        None,
-        session_manager.create_iceberg,
-        req.lakekeeper_url,
+        session_manager.create_ducklake,
+        req.pg_connection_string,
         [db.model_dump() for db in req.databases],
         req.s3.endpoint,
         req.s3.access_key,
         req.s3.secret_key,
         req.s3.region,
-        views,
     )
     return {"session_id": session_id}
 

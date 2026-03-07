@@ -2,6 +2,10 @@
 
 Tests detect_ddl() return shapes and _write_result() parquet output.
 Pure unit tests — no external services needed.
+
+Note: Only CREATE/DROP DATABASE, RENAME DATABASE, and SHOW commands are
+intercepted as DDL. All other SQL (CREATE VIEW, DROP TABLE, etc.) flows
+directly to the DuckLake worker.
 """
 
 import os
@@ -33,45 +37,31 @@ class TestDetectDdlReturnShapes:
         assert result["op"] == "create_database"
         assert result["name"] == "mydb"
 
-    def test_create_schema_shape(self):
-        result = detect_ddl("CREATE SCHEMA dev.myschema")
-        assert result == {"op": "create_schema", "database": "dev", "name": "myschema"}
-        assert set(result.keys()) == {"op", "database", "name"}
-
-    def test_create_schema_quoted(self):
-        result = detect_ddl('CREATE SCHEMA "dev"."myschema"')
-        assert result == {"op": "create_schema", "database": "dev", "name": "myschema"}
-
     def test_drop_database_shape(self):
         result = detect_ddl("DROP DATABASE mydb")
         assert result == {"op": "drop_database", "name": "mydb"}
         assert set(result.keys()) == {"op", "name"}
 
-    def test_drop_schema_shape(self):
-        result = detect_ddl("DROP SCHEMA dev.myschema")
-        assert result == {"op": "drop_schema", "database": "dev", "name": "myschema"}
-        assert set(result.keys()) == {"op", "database", "name"}
+    # Operations that are NOT intercepted (forwarded to DuckLake worker)
+    def test_create_schema_not_intercepted(self):
+        assert detect_ddl("CREATE SCHEMA dev.myschema") is None
 
-    def test_drop_table_shape(self):
-        result = detect_ddl("DROP TABLE dev.myschema.mytable")
-        assert result == {
-            "op": "drop_table",
-            "database": "dev",
-            "schema": "myschema",
-            "name": "mytable",
-        }
-        assert set(result.keys()) == {"op", "database", "schema", "name"}
+    def test_drop_schema_not_intercepted(self):
+        assert detect_ddl("DROP SCHEMA dev.myschema") is None
 
-    def test_drop_view_shape(self):
-        result = detect_ddl("DROP VIEW dev.myschema.myview")
-        assert result == {
-            "op": "drop_view",
-            "database": "dev",
-            "schema": "myschema",
-            "name": "myview",
-        }
-        assert set(result.keys()) == {"op", "database", "schema", "name"}
+    def test_drop_table_not_intercepted(self):
+        assert detect_ddl("DROP TABLE dev.myschema.mytable") is None
 
+    def test_drop_view_not_intercepted(self):
+        assert detect_ddl("DROP VIEW dev.myschema.myview") is None
+
+    def test_create_view_not_intercepted(self):
+        assert detect_ddl("CREATE VIEW dev.myschema.myview AS SELECT 1 AS x") is None
+
+    def test_create_or_replace_view_not_intercepted(self):
+        assert detect_ddl("CREATE OR REPLACE VIEW dev.myschema.myview AS SELECT 1") is None
+
+    # SHOW commands
     def test_show_databases_shape(self):
         result = detect_ddl("SHOW DATABASES")
         assert result == {"op": "show_databases"}
@@ -87,44 +77,7 @@ class TestDetectDdlReturnShapes:
         assert result == {"op": "show_tables", "database": "dev", "schema": "myschema"}
         assert set(result.keys()) == {"op", "database", "schema"}
 
-    def test_create_view_shape(self):
-        result = detect_ddl("CREATE VIEW dev.myschema.myview AS SELECT 1 AS x")
-        assert result["op"] == "create_view"
-        assert result["database"] == "dev"
-        assert result["schema"] == "myschema"
-        assert result["name"] == "myview"
-        assert result["view_sql"] == "SELECT 1 AS x"
-        assert result["or_replace"] is False
-        assert set(result.keys()) == {"op", "database", "schema", "name", "view_sql", "or_replace"}
-
-    def test_create_or_replace_view_shape(self):
-        result = detect_ddl("CREATE OR REPLACE VIEW dev.myschema.myview AS SELECT 1")
-        assert result["op"] == "create_view"
-        assert result["or_replace"] is True
-        assert result["view_sql"] == "SELECT 1"
-
-    def test_create_view_quoted(self):
-        result = detect_ddl('CREATE VIEW "dev"."myschema"."myview" AS SELECT 1')
-        assert result["op"] == "create_view"
-        assert result["database"] == "dev"
-        assert result["schema"] == "myschema"
-        assert result["name"] == "myview"
-
-    def test_create_view_multiline_body(self):
-        sql = "CREATE VIEW dev.s.v AS\nSELECT a, b\nFROM t\nWHERE x > 1"
-        result = detect_ddl(sql)
-        assert result["op"] == "create_view"
-        assert result["view_sql"] == "SELECT a, b\nFROM t\nWHERE x > 1"
-
-    def test_create_view_with_semicolon(self):
-        result = detect_ddl("CREATE VIEW dev.s.v AS SELECT 1;")
-        assert result["view_sql"] == "SELECT 1"
-
-    def test_create_view_with_parens(self):
-        result = detect_ddl("CREATE VIEW dev.s.v AS (SELECT 1)")
-        assert result["view_sql"] == "(SELECT 1)"
-
-    # ALTER ... RENAME TO
+    # ALTER DATABASE RENAME (the only rename intercepted)
     def test_rename_database_shape(self):
         result = detect_ddl("ALTER DATABASE mydb RENAME TO newdb")
         assert result == {"op": "rename_database", "name": "mydb", "new_name": "newdb"}
@@ -133,45 +86,21 @@ class TestDetectDdlReturnShapes:
         result = detect_ddl('ALTER DATABASE "mydb" RENAME TO "newdb"')
         assert result == {"op": "rename_database", "name": "mydb", "new_name": "newdb"}
 
-    def test_rename_schema_shape(self):
-        result = detect_ddl("ALTER SCHEMA dev.myschema RENAME TO newschema")
-        assert result == {"op": "rename_schema", "database": "dev", "name": "myschema", "new_name": "newschema"}
-
-    def test_rename_schema_quoted(self):
-        result = detect_ddl('ALTER SCHEMA "dev"."myschema" RENAME TO "newschema"')
-        assert result == {"op": "rename_schema", "database": "dev", "name": "myschema", "new_name": "newschema"}
-
-    def test_rename_table_shape(self):
-        result = detect_ddl("ALTER TABLE dev.myschema.mytable RENAME TO newtable")
-        assert result == {
-            "op": "rename_table", "database": "dev", "schema": "myschema",
-            "name": "mytable", "new_name": "newtable",
-        }
-
-    def test_rename_table_quoted(self):
-        result = detect_ddl('ALTER TABLE "dev"."myschema"."mytable" RENAME TO "newtable"')
-        assert result["op"] == "rename_table"
-        assert result["name"] == "mytable"
-        assert result["new_name"] == "newtable"
-
-    def test_rename_view_shape(self):
-        result = detect_ddl("ALTER VIEW dev.myschema.myview RENAME TO newview")
-        assert result == {
-            "op": "rename_view", "database": "dev", "schema": "myschema",
-            "name": "myview", "new_name": "newview",
-        }
-
-    def test_rename_view_quoted(self):
-        result = detect_ddl('ALTER VIEW "dev"."myschema"."myview" RENAME TO "newview"')
-        assert result["op"] == "rename_view"
-        assert result["name"] == "myview"
-        assert result["new_name"] == "newview"
-
-    def test_rename_case_insensitive(self):
+    def test_rename_database_case_insensitive(self):
         result = detect_ddl("alter database MyDb rename to NewDb")
         assert result["op"] == "rename_database"
         assert result["name"] == "MyDb"
         assert result["new_name"] == "NewDb"
+
+    # Rename SCHEMA/TABLE/VIEW — NOT intercepted (forwarded to worker)
+    def test_rename_schema_not_intercepted(self):
+        assert detect_ddl("ALTER SCHEMA dev.myschema RENAME TO newschema") is None
+
+    def test_rename_table_not_intercepted(self):
+        assert detect_ddl("ALTER TABLE dev.myschema.mytable RENAME TO newtable") is None
+
+    def test_rename_view_not_intercepted(self):
+        assert detect_ddl("ALTER VIEW dev.myschema.myview RENAME TO newview") is None
 
     def test_non_ddl_returns_none(self):
         assert detect_ddl("SELECT 1") is None

@@ -25,11 +25,9 @@ from scripts.generate_retail_data import (
     COUNTRIES,
     DATABASES,
     DEPT_TREE,
-    create_lakekeeper_warehouse,
-    create_table,
+    create_table_from_arrow,
     elapsed,
-    ensure_namespace,
-    get_catalog,
+    get_ducklake_conn,
     insert_org_database,
     random_dates,
     random_timestamps,
@@ -186,33 +184,33 @@ def main():
             print(f"ERROR: Organization {org_id} not found")
             sys.exit(1)
 
-    # Provision databases
-    catalogs = {}
+    # Provision databases and create DuckLake connections
+    connections = {}
     for db_name, schemas in DATABASES.items():
         print(f"\nProvisioning database: {db_name}")
-        warehouse_name = create_lakekeeper_warehouse(org_id, db_name)
-        insert_org_database(engine, org_id, db_name, warehouse_name)
-        cat = get_catalog(warehouse_name)
-        catalogs[db_name] = cat
+        insert_org_database(engine, org_id, db_name)
+        duck = get_ducklake_conn(org_id, db_name)
+        connections[db_name] = duck
         for schema in schemas:
-            ensure_namespace(cat, schema)
+            duck.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_name}"."{schema}"')
+            print(f"  Ensured schema {schema}")
 
     # retail_catalog.products
-    cat = catalogs["retail_catalog"]
+    duck = connections["retail_catalog"]
     for name, tbl in [("categories", gen_categories()), ("brands", gen_brands()),
                       ("suppliers", gen_suppliers()), ("products", gen_products())]:
-        full = f"products.{name}"
-        it = create_table(cat, "products", name, tbl.schema)
-        it.append(tbl)
-        print(f"  {full}: {tbl.num_rows:,} rows")
+        create_table_from_arrow(duck, "retail_catalog", "products", name, tbl)
+        print(f"  products.{name}: {tbl.num_rows:,} rows")
 
     # retail_ops.stores
-    cat = catalogs["retail_ops"]
+    duck = connections["retail_ops"]
     for name, tbl in [("regions", gen_regions()), ("stores", gen_stores())]:
-        full = f"stores.{name}"
-        it = create_table(cat, "stores", name, tbl.schema)
-        it.append(tbl)
-        print(f"  {full}: {tbl.num_rows:,} rows")
+        create_table_from_arrow(duck, "retail_ops", "stores", name, tbl)
+        print(f"  stores.{name}: {tbl.num_rows:,} rows")
+
+    # Clean up connections
+    for duck in connections.values():
+        duck.close()
 
     print(f"\nDone in {elapsed(t_start)}")
     print("\nRestart the backend to pick up the new databases.")

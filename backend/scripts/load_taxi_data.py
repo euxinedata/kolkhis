@@ -1,10 +1,10 @@
-"""Load all NYC yellow taxi trip data into Iceberg tables.
+"""Load all NYC yellow taxi trip data into DuckLake tables.
 
 Two tables due to schema change in July 2016:
   - nyc.yellow_trips_legacy (2009-01 through 2016-06): lat/lon columns
   - nyc.yellow_trips (2016-07 onwards): location ID columns
 
-Creates a 'nyc_taxi' database in the org's lakehouse if it doesn't exist.
+Creates a 'nyc_taxi' database in the org's DuckLake warehouse if it doesn't exist.
 
 Usage:
     cd backend/
@@ -22,9 +22,9 @@ from sqlalchemy import create_engine, text
 
 from app.config import DATABASE_URL_SYNC
 from scripts.generate_retail_data import (
-    create_lakekeeper_warehouse,
-    ensure_namespace,
-    get_catalog,
+    create_table_from_arrow,
+    get_ducklake_conn,
+    insert_arrow_table,
     insert_org_database,
 )
 
@@ -34,17 +34,6 @@ NAMESPACE = "nyc"
 
 # Schema cutover: 2016-07 switched from lat/lon to PULocationID/DOLocationID
 CUTOVER = "2016-07"
-
-
-def create_or_get_table(catalog, table_name: str, schema: pa.Schema):
-    full_name = f"{NAMESPACE}.{table_name}"
-    existing = [t[-1] for t in catalog.list_tables(NAMESPACE)]
-    if table_name in existing:
-        print(f"  Table '{full_name}' exists, will append")
-        return catalog.load_table(full_name)
-    else:
-        print(f"  Creating table '{full_name}'")
-        return catalog.create_table(full_name, schema=schema)
 
 
 def get_file_month(filepath: str) -> str:
@@ -67,7 +56,25 @@ def _find_canonical_schema(files: list[str]) -> pa.Schema:
     return pa.schema(fields)
 
 
-def load_files(catalog, files: list[str], table_name: str):
+def _align_table(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
+    if table.schema == target_schema:
+        return table
+    aligned_columns = []
+    for field in target_schema:
+        if field.name in table.column_names:
+            col = table.column(field.name)
+            if col.type == pa.null() or col.type != field.type:
+                if col.type == pa.null():
+                    col = pa.nulls(len(table), type=field.type)
+                else:
+                    col = col.cast(field.type)
+            aligned_columns.append(col)
+        else:
+            aligned_columns.append(pa.nulls(len(table), type=field.type))
+    return pa.table(aligned_columns, schema=target_schema)
+
+
+def load_files(conn, files: list[str], table_name: str):
     if not files:
         print(f"No files for {table_name}, skipping")
         return
@@ -76,33 +83,18 @@ def load_files(catalog, files: list[str], table_name: str):
     print(f"\nLoading {len(files)} files into {NAMESPACE}.{table_name}")
 
     canonical_schema = _find_canonical_schema(files)
-    iceberg_table = create_or_get_table(catalog, table_name, canonical_schema)
 
     total_rows = 0
     for i, filepath in enumerate(files):
         month = get_file_month(filepath)
         try:
             table = pq.read_table(filepath)
+            table = _align_table(table, canonical_schema)
 
-            target_schema = iceberg_table.schema().as_arrow()
-            if table.schema != target_schema:
-                aligned_columns = []
-                for field in target_schema:
-                    if field.name in table.column_names:
-                        col = table.column(field.name)
-                        if col.type == pa.null() or col.type != field.type:
-                            if col.type == pa.null():
-                                col = pa.nulls(len(table), type=field.type)
-                            else:
-                                col = col.cast(field.type)
-                        aligned_columns.append(col)
-                    else:
-                        aligned_columns.append(
-                            pa.nulls(len(table), type=field.type)
-                        )
-                table = pa.table(aligned_columns, schema=target_schema)
-
-            iceberg_table.append(table)
+            if i == 0:
+                create_table_from_arrow(conn, DB_NAME, NAMESPACE, table_name, table)
+            else:
+                insert_arrow_table(conn, DB_NAME, NAMESPACE, table_name, table)
             total_rows += table.num_rows
             print(f"  [{i+1}/{len(files)}] {month}: {table.num_rows:,} rows")
         except Exception as e:
@@ -131,10 +123,9 @@ def main():
 
     # Provision database
     print(f"Provisioning database: {DB_NAME}")
-    warehouse_name = create_lakekeeper_warehouse(org_id, DB_NAME)
-    insert_org_database(engine, org_id, DB_NAME, warehouse_name)
-    catalog = get_catalog(warehouse_name)
-    ensure_namespace(catalog, NAMESPACE)
+    insert_org_database(engine, org_id, DB_NAME)
+    duck = get_ducklake_conn(org_id, DB_NAME)
+    duck.execute(f'CREATE SCHEMA IF NOT EXISTS "{DB_NAME}"."{NAMESPACE}"')
 
     # Gather all valid parquet files
     all_files = sorted(glob.glob(f"{DATA_DIR}/yellow_tripdata_*.parquet"))
@@ -152,18 +143,28 @@ def main():
     print(f"Found {len(valid_files)} valid files: "
           f"{len(legacy_files)} legacy, {len(modern_files)} modern")
 
-    existing = [t[-1] for t in catalog.list_tables(NAMESPACE)]
+    # Check existing tables
+    existing = set()
+    try:
+        result = duck.execute(
+            f"SELECT table_name FROM information_schema.tables "
+            f"WHERE table_catalog = '{DB_NAME}' AND table_schema = '{NAMESPACE}'"
+        ).fetchall()
+        existing = {r[0] for r in result}
+    except Exception:
+        pass
 
     if "yellow_trips_legacy" in existing:
         print(f"\nSkipping {NAMESPACE}.yellow_trips_legacy (already loaded)")
     else:
-        load_files(catalog, legacy_files, "yellow_trips_legacy")
+        load_files(duck, legacy_files, "yellow_trips_legacy")
 
     if "yellow_trips" in existing:
         print(f"Dropping existing table {NAMESPACE}.yellow_trips")
-        catalog.drop_table(f"{NAMESPACE}.yellow_trips")
-    load_files(catalog, modern_files, "yellow_trips")
+        duck.execute(f'DROP TABLE IF EXISTS "{DB_NAME}"."{NAMESPACE}"."yellow_trips"')
+    load_files(duck, modern_files, "yellow_trips")
 
+    duck.close()
     print("\nDone.")
 
 

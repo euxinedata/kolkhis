@@ -309,7 +309,7 @@ class TestExecuteQueryIntegration:
         row_count = execute_query(
             job_id=job_id,
             sql=sql,
-            lakekeeper_url="http://localhost:8181", databases=[],
+            pg_connection_string="", databases=[],
             s3_endpoint=self.s3_endpoint,
             s3_access_key=self.s3_access_key,
             s3_secret_key=self.s3_secret_key,
@@ -524,7 +524,7 @@ class TestExecuteQueryIntegration:
         execute_query(
             job_id=job_id,
             sql="SELECT 1",
-            lakekeeper_url="http://localhost:8181", databases=[],
+            pg_connection_string="", databases=[],
             s3_endpoint=self.s3_endpoint,
             s3_access_key=self.s3_access_key,
             s3_secret_key=self.s3_secret_key,
@@ -544,7 +544,7 @@ class TestExecuteQueryIntegration:
             execute_query(
                 job_id=job_id,
                 sql="SELECT * FROM nonexistent_xyz",
-                lakekeeper_url="http://localhost:8181", databases=[],
+                pg_connection_string="", databases=[],
                 s3_endpoint=self.s3_endpoint,
                 s3_access_key=self.s3_access_key,
                 s3_secret_key=self.s3_secret_key,

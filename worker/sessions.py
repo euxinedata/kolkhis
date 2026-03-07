@@ -5,12 +5,12 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import duckdb
 import pyarrow.ipc as ipc
 
-from executor import setup_connection, setup_iceberg_catalog
+from executor import setup_ducklake_catalog
 
 
 @dataclass
@@ -51,38 +51,20 @@ class SessionManager:
             self._sessions[session_id] = session
         return session_id
 
-    def create(
+    def create_ducklake(
         self,
-        catalog_objects: list[dict],
-        s3_endpoint: str,
-        s3_access_key: str,
-        s3_secret_key: str,
-        s3_region: str,
-    ) -> str:
-        session_id = uuid.uuid4().hex
-        conn, temp_dir = self._new_conn(session_id)
-        setup_connection(
-            conn, catalog_objects,
-            s3_endpoint, s3_access_key, s3_secret_key, s3_region,
-        )
-        return self._register_session(session_id, conn, temp_dir)
-
-    def create_iceberg(
-        self,
-        lakekeeper_url: str,
+        pg_connection_string: str,
         databases: list[dict],
         s3_endpoint: str,
         s3_access_key: str,
         s3_secret_key: str,
         s3_region: str,
-        views: list[dict] | None = None,
     ) -> str:
         session_id = uuid.uuid4().hex
         conn, temp_dir = self._new_conn(session_id)
-        setup_iceberg_catalog(
-            conn, lakekeeper_url, databases,
+        setup_ducklake_catalog(
+            conn, pg_connection_string, databases,
             s3_endpoint, s3_access_key, s3_secret_key, s3_region,
-            views=views, force_overlay=True,
         )
         return self._register_session(session_id, conn, temp_dir)
 
@@ -130,7 +112,6 @@ class SessionManager:
 
         with session.lock:
             session.last_used_at = time.time()
-            # table_name is expected as "schema"."name"
             result = session.conn.execute(f"SELECT * FROM {table_name}")
             arrow_table = result.fetch_arrow_table()
 

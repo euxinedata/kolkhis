@@ -2,7 +2,7 @@
 
 Verifies exact column names, types, values, and row counts of parquet files
 produced by the query path (CTAS) and command path (direct execution).
-No external services needed — uses in-memory DuckDB with empty catalog_objects.
+No external services needed — uses in-memory DuckDB with empty databases list.
 """
 
 import os
@@ -37,7 +37,7 @@ class TestQueryParquetStructure:
         row_count = execute_query(
             job_id=job_id,
             sql=sql,
-            lakekeeper_url="http://localhost:8181", databases=[],
+            pg_connection_string="", databases=[],
             result_path=path,
             max_result_rows=max_rows,
             **self.s3_kwargs,
@@ -98,7 +98,7 @@ class TestCommandParquetStructure:
         row_count = execute_query(
             job_id=job_id,
             sql=sql,
-            lakekeeper_url="http://localhost:8181", databases=[],
+            pg_connection_string="", databases=[],
             result_path=path,
             max_result_rows=1000,
             **self.s3_kwargs,
@@ -143,7 +143,7 @@ class TestCommandParquetStructure:
 
 
 class TestSetupConnectionEphemeral:
-    """Proves the job path (setup_connection) doesn't persist tables."""
+    """Proves the job path doesn't persist tables across connections."""
 
     def test_create_table_does_not_persist_across_connections(self, tmp_path):
         """CTAS succeeds on one connection, next connection can't find table."""
@@ -159,7 +159,7 @@ class TestSetupConnectionEphemeral:
         path1 = str(tmp_path / f"{job_id1}.parquet")
         row_count = execute_query(
             job_id=job_id1, sql="CREATE TABLE ephemeral_test AS SELECT 1 AS x",
-            lakekeeper_url="http://localhost:8181", databases=[], result_path=path1, max_result_rows=1000,
+            pg_connection_string="", databases=[], result_path=path1, max_result_rows=1000,
             **s3_kwargs,
         )
         assert row_count == 1
@@ -170,29 +170,9 @@ class TestSetupConnectionEphemeral:
         with pytest.raises(Exception, match="ephemeral_test"):
             execute_query(
                 job_id=job_id2, sql="SELECT * FROM ephemeral_test",
-                lakekeeper_url="http://localhost:8181", databases=[], result_path=path2, max_result_rows=1000,
+                pg_connection_string="", databases=[], result_path=path2, max_result_rows=1000,
                 **s3_kwargs,
             )
-
-    def test_setup_connection_uses_create_view_for_tables(self):
-        """setup_connection() creates VIEWs (not TABLEs) for catalog objects with metadata_location."""
-        import inspect
-        from executor import setup_connection as sc_func
-
-        # Read the source code to verify the SQL pattern
-        source = inspect.getsource(sc_func)
-        # The function should use CREATE VIEW ... iceberg_scan, not CREATE TABLE
-        assert "CREATE VIEW" in source
-        assert "iceberg_scan(" in source
-        # It should NOT use CREATE TABLE for catalog objects
-        # (CREATE TABLE is only used for ephemeral in-memory DBs via ATTACH)
-        lines_with_create_table = [
-            line.strip() for line in source.splitlines()
-            if "CREATE TABLE" in line and "iceberg_scan" in line
-        ]
-        assert len(lines_with_create_table) == 0, (
-            "setup_connection should not use CREATE TABLE with iceberg_scan"
-        )
 
 
 class TestRowCountReturnValue:
@@ -212,7 +192,7 @@ class TestRowCountReturnValue:
         job_id = str(uuid.uuid4())
         path = str(self.result_dir / f"{job_id}.parquet")
         return execute_query(
-            job_id=job_id, sql=sql, lakekeeper_url="http://localhost:8181", databases=[],
+            job_id=job_id, sql=sql, pg_connection_string="", databases=[],
             result_path=path, max_result_rows=1000,
             **self.s3_kwargs,
         )

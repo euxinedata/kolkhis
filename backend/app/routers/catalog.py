@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.database import get_db
-from app.models import OrgDatabase, OrgView
-from app.warehouse import get_database_catalog
+from app.models import OrgDatabase
 
 router = APIRouter(prefix="/api/catalog")
 
@@ -42,6 +41,15 @@ async def list_databases(
     return [{"name": d.name} for d in databases]
 
 
+async def _schema_exists(db: AsyncSession, meta: str) -> bool:
+    """Check if the DuckLake metadata schema exists in PostgreSQL."""
+    result = await db.execute(
+        text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :name"),
+        {"name": meta},
+    )
+    return result.scalar() is not None
+
+
 @router.get("/databases/{db_name}/schemas")
 async def list_schemas(
     db_name: str,
@@ -49,35 +57,34 @@ async def list_schemas(
     db: AsyncSession = Depends(get_db),
 ):
     org_db = await _get_org_db(db_name, auth, db)
-    catalog = get_database_catalog(org_db.lakekeeper_warehouse)
-    namespaces = catalog.list_namespaces()
-    total_size = 0
-    total_tables = 0
-    last_updated_ms = None
+    meta = org_db.metadata_schema
+
+    if not await _schema_exists(db, meta):
+        return {"schemas": [], "total_size": 0, "total_tables": 0, "last_updated_ms": None}
+
+    # Query DuckLake metadata for schemas and their table counts
+    schema_result = await db.execute(text(
+        f'SELECT s.schema_id, s.schema_name FROM "{meta}".ducklake_schema s '
+        f"WHERE s.end_snapshot IS NULL ORDER BY s.schema_name"
+    ))
+    schemas_raw = schema_result.all()
+
     schemas = []
-    for ns in namespaces:
-        ns_name = ns[0]
-        tables = catalog.list_tables(ns_name)
-        ns_size = 0
-        ns_table_count = len(tables)
-        for t in tables:
-            tbl = catalog.load_table(f"{ns_name}.{t[-1]}")
-            snapshot = tbl.current_snapshot()
-            if snapshot:
-                if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
-                    last_updated_ms = snapshot.timestamp_ms
-                if snapshot.summary:
-                    size = snapshot.summary.get("total-files-size")
-                    if size is not None:
-                        ns_size += int(size)
-        total_size += ns_size
+    total_tables = 0
+    for schema_id, schema_name in schemas_raw:
+        table_count_result = await db.execute(text(
+            f'SELECT COUNT(*) FROM "{meta}".ducklake_table t '
+            f"WHERE t.schema_id = :schema_id AND t.end_snapshot IS NULL"
+        ), {"schema_id": schema_id})
+        ns_table_count = table_count_result.scalar() or 0
         total_tables += ns_table_count
-        schemas.append({"name": ns_name, "tables": ns_table_count, "file_size": ns_size})
+        schemas.append({"name": schema_name, "tables": ns_table_count, "file_size": 0})
+
     return {
         "schemas": schemas,
-        "total_size": total_size,
+        "total_size": 0,
         "total_tables": total_tables,
-        "last_updated_ms": last_updated_ms,
+        "last_updated_ms": None,
     }
 
 
@@ -89,41 +96,50 @@ async def list_objects(
     db: AsyncSession = Depends(get_db),
 ):
     org_db = await _get_org_db(db_name, auth, db)
-    catalog = get_database_catalog(org_db.lakekeeper_warehouse)
-    tables = catalog.list_tables(schema_name)
-    result = []
-    total_size = 0
-    last_updated_ms = None
-    for t in tables:
-        tbl = catalog.load_table(f"{schema_name}.{t[-1]}")
-        col_count = len(tbl.schema().fields)
-        file_size = None
-        snapshot = tbl.current_snapshot()
-        if snapshot:
-            if last_updated_ms is None or snapshot.timestamp_ms > last_updated_ms:
-                last_updated_ms = snapshot.timestamp_ms
-            if snapshot.summary:
-                size = snapshot.summary.get("total-files-size")
-                if size is not None:
-                    file_size = int(size)
-                    total_size += file_size
-        result.append({"name": t[-1], "type": "table", "columns": col_count, "file_size": file_size})
+    meta = org_db.metadata_schema
 
-    # Include views from org_views
-    org_id = auth.get("org_id")
-    view_result = await db.execute(
-        select(OrgView).where(
-            OrgView.org_id == org_id,
-            OrgView.database == db_name,
-            OrgView.schema_name == schema_name,
-        )
-    )
-    table_names = {t[-1] for t in tables}
-    for v in view_result.scalars().all():
-        if v.name not in table_names:
-            result.append({"name": v.name, "type": "view", "columns": None, "file_size": None})
+    if not await _schema_exists(db, meta):
+        return {"objects": [], "total_size": 0, "last_updated_ms": None}
 
-    return {"objects": result, "total_size": total_size, "last_updated_ms": last_updated_ms}
+    # Get schema_id
+    schema_id_result = await db.execute(text(
+        f'SELECT schema_id FROM "{meta}".ducklake_schema WHERE schema_name = :name AND end_snapshot IS NULL'
+    ), {"name": schema_name})
+    schema_row = schema_id_result.first()
+    if schema_row is None:
+        return {"objects": [], "total_size": 0, "last_updated_ms": None}
+    schema_id = schema_row[0]
+
+    result_list = []
+
+    # Tables
+    table_result = await db.execute(text(
+        f'SELECT t.table_id, t.table_name FROM "{meta}".ducklake_table t '
+        f"WHERE t.schema_id = :schema_id AND t.end_snapshot IS NULL "
+        f"ORDER BY t.table_name"
+    ), {"schema_id": schema_id})
+    for table_id, table_name in table_result.all():
+        # Count columns
+        col_count_result = await db.execute(text(
+            f'SELECT COUNT(*) FROM "{meta}".ducklake_column c '
+            f"WHERE c.table_id = :table_id AND c.end_snapshot IS NULL"
+        ), {"table_id": table_id})
+        col_count = col_count_result.scalar() or 0
+        result_list.append({"name": table_name, "type": "table", "columns": col_count, "file_size": None})
+
+    # Views
+    try:
+        view_result = await db.execute(text(
+            f'SELECT v.view_name FROM "{meta}".ducklake_view v '
+            f"WHERE v.schema_id = :schema_id AND v.end_snapshot IS NULL "
+            f"ORDER BY v.view_name"
+        ), {"schema_id": schema_id})
+        for (view_name,) in view_result.all():
+            result_list.append({"name": view_name, "type": "view", "columns": None, "file_size": None})
+    except Exception:
+        pass
+
+    return {"objects": result_list, "total_size": 0, "last_updated_ms": None}
 
 
 @router.get("/databases/{db_name}/schemas/{schema_name}/objects/{obj_name}/schema")
@@ -135,97 +151,71 @@ async def get_object_schema(
     db: AsyncSession = Depends(get_db),
 ):
     org_db = await _get_org_db(db_name, auth, db)
-    catalog = get_database_catalog(org_db.lakekeeper_warehouse)
-    try:
-        tbl = catalog.load_table(f"{schema_name}.{obj_name}")
-    except Exception:
-        # Check if it's a view in org_views
-        org_id = auth.get("org_id")
-        view_result = await db.execute(
-            select(OrgView).where(
-                OrgView.org_id == org_id,
-                OrgView.database == db_name,
-                OrgView.schema_name == schema_name,
-                OrgView.name == obj_name,
-            )
-        )
-        view = view_result.scalar_one_or_none()
-        if view is None:
-            raise HTTPException(status_code=404, detail=f"Object '{db_name}.{schema_name}.{obj_name}' not found")
+    meta = org_db.metadata_schema
+
+    if not await _schema_exists(db, meta):
+        raise HTTPException(status_code=404, detail=f"Object '{db_name}.{schema_name}.{obj_name}' not found")
+
+    # Get schema_id
+    schema_id_result = await db.execute(text(
+        f'SELECT schema_id FROM "{meta}".ducklake_schema WHERE schema_name = :name AND end_snapshot IS NULL'
+    ), {"name": schema_name})
+    schema_row = schema_id_result.first()
+    if schema_row is None:
+        raise HTTPException(status_code=404, detail=f"Object '{db_name}.{schema_name}.{obj_name}' not found")
+    schema_id = schema_row[0]
+
+    # Try table first
+    table_result = await db.execute(text(
+        f'SELECT t.table_id FROM "{meta}".ducklake_table t '
+        f"WHERE t.schema_id = :schema_id AND t.table_name = :name AND t.end_snapshot IS NULL"
+    ), {"schema_id": schema_id, "name": obj_name})
+    table_row = table_result.first()
+
+    if table_row is not None:
+        table_id = table_row[0]
+        # Get columns
+        col_result = await db.execute(text(
+            f'SELECT c.column_name, c.column_type FROM "{meta}".ducklake_column c '
+            f"WHERE c.table_id = :table_id AND c.end_snapshot IS NULL "
+            f"ORDER BY c.column_order"
+        ), {"table_id": table_id})
+        columns = [
+            {"name": row[0], "type": row[1], "required": False}
+            for row in col_result.all()
+        ]
+
         return {
-            "type": "view",
-            "view_sql": view.view_sql,
+            "type": "table",
             "row_count": None,
             "total_file_size": None,
             "total_data_files": None,
             "last_updated_ms": None,
             "partition_fields": None,
             "snapshots": [],
-            "columns": [],
+            "columns": columns,
         }
 
-    row_count = None
-    total_file_size = None
-    total_data_files = None
-    last_updated_ms = None
-    snapshot = tbl.current_snapshot()
-    if snapshot:
-        last_updated_ms = snapshot.timestamp_ms
-        if snapshot.summary:
-            total = snapshot.summary.get("total-records")
-            if total is not None:
-                row_count = int(total)
-            size = snapshot.summary.get("total-files-size")
-            if size is not None:
-                total_file_size = int(size)
-            files = snapshot.summary.get("total-data-files")
-            if files is not None:
-                total_data_files = int(files)
-
-    # Partition info
-    spec = tbl.spec()
-    partition_fields = None
-    if not spec.is_unpartitioned():
-        schema = tbl.schema()
-        partition_fields = []
-        for pf in spec.fields:
-            source_field = schema.find_field(pf.source_id)
-            partition_fields.append({
-                "name": source_field.name,
-                "transform": str(pf.transform),
-            })
-
-    # Recent snapshots (last 10)
-    snapshots = []
-    for snap in reversed(tbl.snapshots()[-10:]):
-        entry = {
-            "snapshot_id": snap.snapshot_id,
-            "timestamp_ms": snap.timestamp_ms,
-        }
-        if snap.summary:
-            entry["operation"] = str(snap.summary.operation.value)
-            added = snap.summary.get("added-records")
-            if added is not None:
-                entry["added_records"] = int(added)
-            deleted = snap.summary.get("deleted-records")
-            if deleted is not None:
-                entry["deleted_records"] = int(deleted)
-        snapshots.append(entry)
-
-    return {
-        "type": "table",
-        "row_count": row_count,
-        "total_file_size": total_file_size,
-        "total_data_files": total_data_files,
-        "last_updated_ms": last_updated_ms,
-        "partition_fields": partition_fields,
-        "snapshots": snapshots,
-        "columns": [
-            {
-                "name": field.name,
-                "type": str(field.field_type),
-                "required": field.required,
+    # Try view
+    try:
+        view_result = await db.execute(text(
+            f'SELECT v.sql FROM "{meta}".ducklake_view v '
+            f"WHERE v.schema_id = :schema_id AND v.view_name = :name AND v.end_snapshot IS NULL"
+        ), {"schema_id": schema_id, "name": obj_name})
+        view_row = view_result.first()
+        if view_row is not None:
+            return {
+                "type": "view",
+                "view_sql": view_row[0],
+                "row_count": None,
+                "total_file_size": None,
+                "total_data_files": None,
+                "last_updated_ms": None,
+                "partition_fields": None,
+                "snapshots": [],
+                "columns": [],
             }
-            for field in tbl.schema().fields
-        ],
-    }
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail=f"Object '{db_name}.{schema_name}.{obj_name}' not found")

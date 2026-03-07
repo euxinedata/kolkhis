@@ -1,7 +1,6 @@
 import asyncio
 import logging
 
-import httpx
 import s3fs
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,11 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_INTERNAL_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, LAKEKEEPER_URL
+from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import OrgDatabase, Organization, OrgMembership, User
 from app.shell import ensure_shell_user
+from app.warehouse import ducklake_data_path, ducklake_metadata_schema
 from app.workspace import ensure_clone
 
 logger = logging.getLogger(__name__)
@@ -35,45 +35,8 @@ class ApproveMemberRequest(BaseModel):
     user_id: int
 
 
-async def _create_lakekeeper_warehouse(
-    client: httpx.AsyncClient, org_id: str, db_name: str,
-) -> str:
-    """Create a Lakekeeper warehouse for an org database. Returns the warehouse name."""
-    warehouse_name = f"{org_id}-{db_name}"
-    resp = await client.post(
-        f"{LAKEKEEPER_URL}/management/v1/warehouse",
-        headers={
-            "Content-Type": "application/json",
-            "X-Project-Id": "00000000-0000-0000-0000-000000000000",
-        },
-        json={
-            "warehouse-name": warehouse_name,
-            "storage-profile": {
-                "type": "s3",
-                "bucket": S3_BUCKET_NAME,
-                "key-prefix": f"{org_id}/{db_name}",
-                "region": S3_REGION,
-                "flavor": "s3-compat",
-                "endpoint": S3_INTERNAL_ENDPOINT,
-                "path-style-access": True,
-                "sts-enabled": False,
-                "remote-signing-enabled": False,
-            },
-            "storage-credential": {
-                "type": "s3",
-                "credential-type": "access-key",
-                "aws-access-key-id": S3_ACCESS_KEY,
-                "aws-secret-access-key": S3_SECRET_KEY,
-            },
-        },
-    )
-    if resp.status_code not in (201, 409):
-        raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
-    return warehouse_name
-
-
 async def _create_org_storage(org_id: str, db: AsyncSession) -> None:
-    """Create S3 prefix and initial databases for the org."""
+    """Create S3 prefix and initial 'development' database for the org."""
     fs = s3fs.S3FileSystem(
         endpoint_url=S3_ENDPOINT,
         key=S3_ACCESS_KEY,
@@ -82,11 +45,13 @@ async def _create_org_storage(org_id: str, db: AsyncSession) -> None:
     )
     await asyncio.to_thread(fs.mkdirs, f"{S3_BUCKET_NAME}/{org_id}", exist_ok=True)
 
-    # Create the 'development' database (Lakekeeper warehouse)
-    async with httpx.AsyncClient() as client:
-        warehouse_name = await _create_lakekeeper_warehouse(client, org_id, "development")
-
-    org_db = OrgDatabase(org_id=org_id, name="development", lakekeeper_warehouse=warehouse_name)
+    # Create the 'development' database record (DuckLake auto-creates metadata schema on first ATTACH)
+    data_path = ducklake_data_path(org_id, "development")
+    metadata_schema = ducklake_metadata_schema(org_id, "development")
+    org_db = OrgDatabase(
+        org_id=org_id, name="development",
+        data_path=data_path, metadata_schema=metadata_schema,
+    )
     db.add(org_db)
 
 

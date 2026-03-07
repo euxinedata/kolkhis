@@ -32,9 +32,8 @@ class TestDatabaseLifecycle:
         assert "e2e_testdb" in db_names
 
     def test_create_schema(self, api):
-        status, data, _ = submit_and_wait(api, "CREATE SCHEMA e2e_testdb.e2e_schema")
-        assert status == "ddl"
-        assert "created" in data["ddl_message"].lower()
+        status, _, _ = submit_and_wait(api, "CREATE SCHEMA e2e_testdb.e2e_schema")
+        assert status == "completed"
 
     def test_show_schemas_includes_new(self, api):
         status, job, results = submit_and_wait(api, "SHOW SCHEMAS IN e2e_testdb")
@@ -48,10 +47,10 @@ class TestDatabaseLifecycle:
         assert results["total"] == 0
 
     def test_create_view_in_new_db(self, api):
-        status, data, _ = submit_and_wait(
+        status, _, _ = submit_and_wait(
             api, "CREATE VIEW e2e_testdb.e2e_schema.v AS SELECT 1 AS val"
         )
-        assert status == "ddl"
+        assert status == "completed"
 
     def test_show_tables_includes_view(self, api):
         status, job, results = submit_and_wait(api, "SHOW TABLES IN e2e_testdb.e2e_schema")
@@ -69,14 +68,12 @@ class TestDatabaseLifecycle:
         assert results["rows"] == [{"val": 1}]
 
     def test_drop_view(self, api):
-        status, data, _ = submit_and_wait(api, "DROP VIEW e2e_testdb.e2e_schema.v")
-        assert status == "ddl"
-        assert "dropped" in data["ddl_message"].lower()
+        status, _, _ = submit_and_wait(api, "DROP VIEW e2e_testdb.e2e_schema.v")
+        assert status == "completed"
 
     def test_drop_schema(self, api):
-        status, data, _ = submit_and_wait(api, "DROP SCHEMA e2e_testdb.e2e_schema")
-        assert status == "ddl"
-        assert "dropped" in data["ddl_message"].lower()
+        status, _, _ = submit_and_wait(api, "DROP SCHEMA e2e_testdb.e2e_schema")
+        assert status == "completed"
 
     def test_drop_database(self, api):
         status, data, _ = submit_and_wait(api, "DROP DATABASE e2e_testdb")

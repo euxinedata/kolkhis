@@ -49,20 +49,19 @@ class TestNonexistentResources:
         assert "not found" in resp.json()["detail"].lower()
 
     def test_drop_nonexistent_view(self, api):
-        resp = api.post(
-            "/api/queries",
-            json={"sql": f"DROP VIEW development.{SCHEMA}.e2e_nonexistent"},
+        """DROP VIEW on nonexistent view fails at DuckLake level."""
+        status, job, _ = submit_and_wait(
+            api,
+            f"DROP VIEW development.{SCHEMA}.e2e_nonexistent",
         )
-        assert resp.status_code == 400
-        assert "not found" in resp.json()["detail"].lower()
+        assert status == "failed"
 
     def test_create_view_in_nonexistent_db(self, api):
-        resp = api.post(
-            "/api/queries",
-            json={"sql": "CREATE VIEW nonexistent.s.v AS SELECT 1"},
+        """CREATE VIEW in nonexistent database fails at worker level."""
+        status, job, _ = submit_and_wait(
+            api, "CREATE VIEW nonexistent.s.v AS SELECT 1",
         )
-        assert resp.status_code == 400
-        assert "not found" in resp.json()["detail"].lower()
+        assert status == "failed"
 
 
 class TestDuplicateView:
@@ -75,11 +74,10 @@ class TestDuplicateView:
                 f"CREATE VIEW development.{SCHEMA}.e2e_dup_test AS SELECT 1 AS x",
             )
 
-            resp = api.post(
-                "/api/queries",
-                json={"sql": f"CREATE VIEW development.{SCHEMA}.e2e_dup_test AS SELECT 2 AS y"},
+            status, job, _ = submit_and_wait(
+                api,
+                f"CREATE VIEW development.{SCHEMA}.e2e_dup_test AS SELECT 2 AS y",
             )
-            assert resp.status_code == 400
-            assert "already exists" in resp.json()["detail"].lower()
+            assert status == "failed"
         finally:
             safe_cleanup(api, f"DROP VIEW development.{SCHEMA}.e2e_dup_test")
