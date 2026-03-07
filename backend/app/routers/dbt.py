@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.config import (
-    LAKEKEEPER_WORKER_URL,
+    DUCKLAKE_PG_CONNECTION,
     S3_ACCESS_KEY,
     S3_ENDPOINT,
     S3_REGION,
@@ -22,7 +22,7 @@ from app.config import (
 )
 from app.database import get_db
 from app.ddl import detect_ddl, execute_ddl
-from app.models import OrgDatabase, OrgView, QueryJob
+from app.models import OrgDatabase, QueryJob
 
 logger = logging.getLogger(__name__)
 
@@ -84,35 +84,26 @@ async def create_session(
             pass
         _active_sessions.pop(user_id, None)
 
-    # Create new Iceberg session on the worker
+    # Create new DuckLake session on the worker
     org_id = user.get("org_id")
     if not org_id:
         raise HTTPException(status_code=400, detail="No active organization")
 
-    # Look up org databases and views
+    # Look up org databases
     result = await db.execute(
         select(OrgDatabase).where(OrgDatabase.org_id == org_id)
     )
     org_databases = result.scalars().all()
     databases = [
-        {"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse}
+        {"name": d.name, "data_path": d.data_path, "metadata_schema": d.metadata_schema}
         for d in org_databases
-    ]
-    result = await db.execute(
-        select(OrgView).where(OrgView.org_id == org_id)
-    )
-    org_views = result.scalars().all()
-    views = [
-        {"database": v.database, "schema_name": v.schema_name, "name": v.name, "view_sql": v.view_sql}
-        for v in org_views
     ]
 
     worker_url = await _get_worker_url(user_id)
 
     payload = {
-        "lakekeeper_url": LAKEKEEPER_WORKER_URL,
+        "pg_connection_string": DUCKLAKE_PG_CONNECTION,
         "databases": databases,
-        "views": views,
         "s3": {
             "endpoint": S3_ENDPOINT,
             "access_key": S3_ACCESS_KEY,
@@ -124,7 +115,7 @@ async def create_session(
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{worker_url}/session/iceberg",
+                f"{worker_url}/session/ducklake",
                 json=payload,
                 headers=_worker_headers(),
             )
@@ -158,27 +149,6 @@ _DBT_COMMENT_RE = re.compile(r"^\s*/\*.*?\*/\s*", re.DOTALL)
 def _strip_dbt_comment(sql: str) -> str:
     """Strip the leading /* ... */ comment block that dbt prepends to every query."""
     return _DBT_COMMENT_RE.sub("", sql)
-
-
-# Regex for rewriting CREATE TABLE/DROP TABLE to target _ice_ prefix in overlay mode
-_CREATE_TABLE_RE = re.compile(
-    r"^(\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)"
-    r'"?(\w+)"?\."?(\w+)"?\."?(\w+)"?'
-    r"(\s+.*)",
-    re.IGNORECASE | re.DOTALL,
-)
-_DROP_TABLE_RE = re.compile(
-    r"^(\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?)"
-    r'"?(\w+)"?\."?(\w+)"?\."?(\w+)"?'
-    r"(\s*;?\s*)$",
-    re.IGNORECASE,
-)
-_CREATE_SCHEMA_RE = re.compile(
-    r"^(\s*CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?)"
-    r'"?(\w+)"?\."?(\w+)"?'
-    r"(\s*;?\s*)$",
-    re.IGNORECASE,
-)
 
 
 async def _touch_worker_vm(user_id: int):
@@ -230,58 +200,15 @@ async def session_query(
         # Strip dbt's leading /* ... */ comment for pattern matching
         clean_sql = _strip_dbt_comment(body.sql)
 
-        # Intercept CREATE/DROP VIEW — store in PostgreSQL, forward to worker session
+        # Intercept DDL that affects OrgDatabase records (CREATE/DROP DATABASE)
         ddl = detect_ddl(clean_sql)
-        if ddl and ddl["op"] == "create_view":
+        if ddl and ddl["op"] in ("create_database", "drop_database", "rename_database"):
             await execute_ddl(ddl, org_id, db)
-            result = await _forward_query(worker_url, session_id, clean_sql, body.fetch_results)
+            result = {"status": "completed", "columns": None, "rows": None, "row_count": 0}
             await _record_result(db, job_id, result)
             return result
 
-        if ddl and ddl["op"] == "drop_view":
-            await execute_ddl(ddl, org_id, db)
-            result = await _forward_query(worker_url, session_id, clean_sql, body.fetch_results)
-            await _record_result(db, job_id, result)
-            return result
-
-        # Intercept CREATE TABLE — rewrite to target _ice_ prefix, then create pass-through view
-        m = _CREATE_TABLE_RE.match(clean_sql)
-        if m:
-            prefix, db_name, schema_name, table_name, rest = m.groups()
-            ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"{rest}'
-            result = await _forward_query(worker_url, session_id, ice_sql, body.fetch_results)
-            # Create pass-through view in the memory overlay
-            view_sql = (
-                f'CREATE OR REPLACE VIEW "{db_name}"."{schema_name}"."{table_name}" '
-                f'AS SELECT * FROM "_ice_{db_name}"."{schema_name}"."{table_name}"'
-            )
-            await _forward_query(worker_url, session_id, view_sql, fetch_results=False)
-            await _record_result(db, job_id, result)
-            return result
-
-        # Intercept DROP TABLE — rewrite to _ice_ prefix, drop pass-through view
-        m = _DROP_TABLE_RE.match(clean_sql)
-        if m:
-            prefix, db_name, schema_name, table_name, _ = m.groups()
-            ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"."{table_name}"'
-            result = await _forward_query(worker_url, session_id, ice_sql, body.fetch_results)
-            drop_view_sql = f'DROP VIEW IF EXISTS "{db_name}"."{schema_name}"."{table_name}"'
-            await _forward_query(worker_url, session_id, drop_view_sql, fetch_results=False)
-            await _record_result(db, job_id, result)
-            return result
-
-        # Intercept CREATE SCHEMA — forward to both _ice_ and overlay databases
-        m = _CREATE_SCHEMA_RE.match(clean_sql)
-        if m:
-            prefix, db_name, schema_name, _ = m.groups()
-            ice_sql = f'{prefix}"_ice_{db_name}"."{schema_name}"'
-            await _forward_query(worker_url, session_id, ice_sql, fetch_results=False)
-            overlay_sql = f'{prefix}"{db_name}"."{schema_name}"'
-            result = await _forward_query(worker_url, session_id, overlay_sql, body.fetch_results)
-            await _record_result(db, job_id, result)
-            return result
-
-        # All other SQL — forward as-is
+        # All other SQL — forward as-is to worker (DuckLake handles everything natively)
         result = await _forward_query(worker_url, session_id, body.sql, body.fetch_results)
         await _record_result(db, job_id, result)
         return result

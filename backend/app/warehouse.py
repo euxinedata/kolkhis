@@ -1,26 +1,17 @@
-from functools import lru_cache
+"""DuckLake helpers — build connection strings and metadata schema names."""
 
-from pyiceberg.catalog.rest import RestCatalog
-
-from app.config import LAKEKEEPER_URL, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION
+from app.config import S3_BUCKET_NAME
 
 
-@lru_cache(maxsize=128)
-def get_database_catalog(lakekeeper_warehouse: str) -> RestCatalog:
-    """Return a PyIceberg RestCatalog for a specific Lakekeeper warehouse (database)."""
-    return RestCatalog(
-        f"db-{lakekeeper_warehouse}",
-        uri=f"{LAKEKEEPER_URL}/catalog",
-        warehouse=lakekeeper_warehouse,
-        **{
-            "s3.endpoint": S3_ENDPOINT,
-            "s3.access-key-id": S3_ACCESS_KEY,
-            "s3.secret-access-key": S3_SECRET_KEY,
-            "s3.region": S3_REGION,
-        },
-    )
+def ducklake_metadata_schema(org_id: str, db_name: str) -> str:
+    """Return the PostgreSQL schema name for DuckLake metadata.
+
+    Uses first 8 chars of org_id (before first hyphen) to keep names short.
+    """
+    short_org = org_id.split("-")[0]
+    return f"ducklake_{short_org}_{db_name}"
 
 
-def invalidate_catalog_cache() -> None:
-    """Clear all cached RestCatalog entries (e.g. after warehouse create/delete)."""
-    get_database_catalog.cache_clear()
+def ducklake_data_path(org_id: str, db_name: str) -> str:
+    """Return the S3 data path for a DuckLake database."""
+    return f"s3://{S3_BUCKET_NAME}/{org_id}/{db_name}/"

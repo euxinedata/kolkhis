@@ -150,11 +150,11 @@ class TestDbtSessionLifecycle:
         assert "vw" not in names, f"View still in catalog after DROP. Objects: {names}"
 
     def test_cleanup_schema(self, api):
-        """Use SQL editor to drop schema (dbt session may not support DROP SCHEMA)."""
-        status, data, _ = submit_and_wait(
+        """Use SQL editor to drop schema."""
+        status, _, _ = submit_and_wait(
             api, "DROP SCHEMA development.e2e_dbt_test"
         )
-        assert status == "ddl"
+        assert status == "completed"
 
     def test_close_session(self, api, session_id):
         resp = api.delete(f"/api/dbt/session/{session_id}")

@@ -1,20 +1,18 @@
-"""Generate synthetic retail data for an org's Iceberg lakehouse.
+"""Generate synthetic retail data for an org's DuckLake warehouse.
 
 Creates 3 databases with 2 schemas each, totalling 17 tables:
   - retail_catalog: products, pricing
   - retail_ops: stores, inventory
   - retail_sales: transactions, customers
 
-Each database becomes a separate Lakekeeper warehouse ({org_id}-{db_name}).
-The script provisions everything: Lakekeeper warehouses, OrgDatabase records,
-namespaces, and table data.
+Each database becomes a separate DuckLake-attached database with metadata
+stored in PostgreSQL and data as Parquet on S3.
 
 Usage:
     cd backend/
     python scripts/generate_retail_data.py <org_uuid>
 """
 
-import io
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -22,24 +20,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import httpx
+import duckdb
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 from faker import Faker
-from pyiceberg.catalog.rest import RestCatalog
 from sqlalchemy import create_engine, text
 
 from app.config import (
     DATABASE_URL_SYNC,
-    LAKEKEEPER_URL,
+    DUCKLAKE_PG_CONNECTION,
     S3_ACCESS_KEY,
-    S3_BUCKET_NAME,
     S3_ENDPOINT,
-    S3_INTERNAL_ENDPOINT,
     S3_REGION,
     S3_SECRET_KEY,
 )
+from app.warehouse import ducklake_data_path, ducklake_metadata_schema
 
 # ---------------------------------------------------------------------------
 # Config
@@ -47,8 +42,6 @@ from app.config import (
 
 SEED = 42
 CHUNK_SIZE = 2_000_000                       # rows per generation chunk
-TARGET_DISK_SIZE = 512 * 1024 * 1024         # 512 MB Parquet files on disk
-BIN_PACKER_BYPASS = 10 * 1024 * 1024 * 1024  # 10 GB — prevents bin-packer from splitting
 
 # Database → schemas mapping
 DATABASES = {
@@ -164,47 +157,10 @@ _DOMAINS_ARR = np.array(_DOMAINS)
 # ---------------------------------------------------------------------------
 
 
-def create_lakekeeper_warehouse(org_id: str, db_name: str) -> str:
-    """Create a Lakekeeper warehouse for an org database. Returns the warehouse name."""
-    warehouse_name = f"{org_id}-{db_name}"
-    resp = httpx.post(
-        f"{LAKEKEEPER_URL}/management/v1/warehouse",
-        headers={
-            "Content-Type": "application/json",
-            "X-Project-Id": "00000000-0000-0000-0000-000000000000",
-        },
-        json={
-            "warehouse-name": warehouse_name,
-            "storage-profile": {
-                "type": "s3",
-                "bucket": S3_BUCKET_NAME,
-                "key-prefix": f"{org_id}/{db_name}",
-                "region": S3_REGION,
-                "flavor": "s3-compat",
-                "endpoint": S3_INTERNAL_ENDPOINT,
-                "path-style-access": True,
-                "sts-enabled": False,
-                "remote-signing-enabled": False,
-            },
-            "storage-credential": {
-                "type": "s3",
-                "credential-type": "access-key",
-                "aws-access-key-id": S3_ACCESS_KEY,
-                "aws-secret-access-key": S3_SECRET_KEY,
-            },
-        },
-        timeout=30,
-    )
-    if resp.status_code in (201, 409):
-        return warehouse_name
-    if resp.status_code == 400 and "StorageProfileOverlap" in resp.text:
-        print(f"  Warehouse {warehouse_name} already exists (storage overlap), reusing")
-        return warehouse_name
-    raise Exception(f"Lakekeeper warehouse creation failed: {resp.status_code} {resp.text}")
-
-
-def insert_org_database(engine, org_id: str, db_name: str, warehouse_name: str):
+def insert_org_database(engine, org_id: str, db_name: str):
     """Insert an OrgDatabase record if it doesn't exist."""
+    data_path = ducklake_data_path(org_id, db_name)
+    metadata_schema = ducklake_metadata_schema(org_id, db_name)
     with engine.connect() as conn:
         exists = conn.execute(
             text("SELECT 1 FROM org_databases WHERE org_id = :org_id AND name = :name"),
@@ -212,28 +168,42 @@ def insert_org_database(engine, org_id: str, db_name: str, warehouse_name: str):
         ).fetchone()
         if not exists:
             conn.execute(
-                text("INSERT INTO org_databases (org_id, name, lakekeeper_warehouse) VALUES (:org_id, :name, :wh)"),
-                {"org_id": org_id, "name": db_name, "wh": warehouse_name},
+                text(
+                    "INSERT INTO org_databases (org_id, name, data_path, metadata_schema) "
+                    "VALUES (:org_id, :name, :dp, :ms)"
+                ),
+                {"org_id": org_id, "name": db_name, "dp": data_path, "ms": metadata_schema},
             )
             conn.commit()
-            print(f"  Inserted OrgDatabase: {db_name} -> {warehouse_name}")
+            print(f"  Inserted OrgDatabase: {db_name} -> {metadata_schema}")
         else:
             print(f"  OrgDatabase {db_name} already exists")
 
 
-def get_catalog(warehouse_name: str) -> RestCatalog:
-    """Create a PyIceberg RestCatalog for a specific Lakekeeper warehouse."""
-    return RestCatalog(
-        f"gen-{warehouse_name}",
-        uri=f"{LAKEKEEPER_URL}/catalog",
-        warehouse=warehouse_name,
-        **{
-            "s3.endpoint": S3_ENDPOINT,
-            "s3.access-key-id": S3_ACCESS_KEY,
-            "s3.secret-access-key": S3_SECRET_KEY,
-            "s3.region": S3_REGION,
-        },
-    )
+def get_ducklake_conn(org_id: str, db_name: str) -> duckdb.DuckDBPyConnection:
+    """Create a DuckDB connection with DuckLake attached for a single database."""
+    conn = duckdb.connect()
+    conn.execute("INSTALL ducklake")
+    conn.execute("LOAD ducklake")
+    conn.execute(f"""
+        CREATE SECRET (
+            TYPE S3,
+            KEY_ID '{S3_ACCESS_KEY}',
+            SECRET '{S3_SECRET_KEY}',
+            REGION '{S3_REGION}',
+            ENDPOINT '{S3_ENDPOINT.replace("http://", "").replace("https://", "")}',
+            URL_STYLE 'path',
+            USE_SSL false
+        )
+    """)
+    data_path = ducklake_data_path(org_id, db_name)
+    metadata_schema = ducklake_metadata_schema(org_id, db_name)
+    conn.execute(f"""
+        ATTACH 'ducklake:postgres:{DUCKLAKE_PG_CONNECTION}'
+        AS "{db_name}"
+        (DATA_PATH '{data_path}', METADATA_SCHEMA '{metadata_schema}')
+    """)
+    return conn
 
 
 # ---------------------------------------------------------------------------
@@ -243,30 +213,6 @@ def get_catalog(warehouse_name: str) -> RestCatalog:
 
 def elapsed(start: float) -> str:
     return f"{time.time() - start:.1f}s"
-
-
-def calibrate_parquet_bytes_per_row(sample: pa.Table) -> float:
-    buf = io.BytesIO()
-    pq.write_table(sample, buf, compression='zstd')
-    return len(buf.getvalue()) / sample.num_rows
-
-
-def ensure_namespace(catalog: RestCatalog, ns: str):
-    existing = {".".join(t) for t in catalog.list_namespaces()}
-    if ns not in existing:
-        catalog.create_namespace(ns)
-        print(f"  Created namespace {ns}")
-
-
-def create_table(catalog: RestCatalog, ns: str, name: str, schema: pa.Schema):
-    full = f"{ns}.{name}"
-    existing = {t[-1] for t in catalog.list_tables(ns)}
-    if name in existing:
-        print(f"  Table {full} already exists, dropping")
-        catalog.drop_table(full)
-    print(f"  Creating {full}")
-    props = {"write.target-file-size-bytes": str(BIN_PACKER_BYPASS)}
-    return catalog.create_table(full, schema=schema, properties=props)
 
 
 def random_dates(start: date, end: date, n: int) -> pa.Array:
@@ -282,6 +228,24 @@ def random_timestamps(start: date, end: date, n: int) -> pa.Array:
     end_ts = int(datetime(end.year, end.month, end.day, 23, 59, 59).timestamp())
     ts = rng.integers(start_ts, end_ts + 1, size=n)
     return pa.array(ts * 1_000_000, type=pa.timestamp("us"))
+
+
+def insert_arrow_table(conn: duckdb.DuckDBPyConnection, db_name: str, schema: str, table_name: str, data: pa.Table):
+    """Insert a PyArrow table into a DuckLake table via DuckDB."""
+    conn.register("_tmp_data", data)
+    conn.execute(f'INSERT INTO "{db_name}"."{schema}"."{table_name}" SELECT * FROM _tmp_data')
+    conn.unregister("_tmp_data")
+
+
+def create_table_from_arrow(conn: duckdb.DuckDBPyConnection, db_name: str, schema: str, table_name: str, data: pa.Table):
+    """Create a table from a PyArrow table (drop if exists, create, insert)."""
+    try:
+        conn.execute(f'DROP TABLE IF EXISTS "{db_name}"."{schema}"."{table_name}"')
+    except Exception:
+        pass
+    conn.register("_tmp_data", data)
+    conn.execute(f'CREATE TABLE "{db_name}"."{schema}"."{table_name}" AS SELECT * FROM _tmp_data')
+    conn.unregister("_tmp_data")
 
 
 # ---------------------------------------------------------------------------
@@ -640,54 +604,27 @@ def gen_payments_chunk(chunk_start: int, chunk_size: int) -> pa.Table:
 # ---------------------------------------------------------------------------
 
 
-def write_chunked(catalog: RestCatalog, ns: str, table_name: str, total: int, gen_fn, schema: pa.Schema):
+def write_chunked(conn: duckdb.DuckDBPyConnection, db_name: str, schema: str,
+                  table_name: str, total: int, gen_fn):
+    """Generate data in chunks and insert into a DuckLake table."""
     t0 = time.time()
+
+    # Create table from first chunk
     first_chunk = gen_fn(0, CHUNK_SIZE)
+    create_table_from_arrow(conn, db_name, schema, table_name, first_chunk)
+    written = first_chunk.num_rows
     generated = first_chunk.num_rows
-    bytes_per_row = calibrate_parquet_bytes_per_row(first_chunk)
-    target_rows = int(TARGET_DISK_SIZE / bytes_per_row)
-    est_mem_mb = int(target_rows * first_chunk.nbytes / first_chunk.num_rows / 1024 / 1024)
-    print(f"    Calibration: {bytes_per_row:.1f} disk bytes/row, "
-          f"target {target_rows:,} rows/file, ~{est_mem_mb} MB memory/flush")
+    pct = written * 100 // total
+    print(f"    {pct:3d}% — {written:>14,}/{total:,} rows ({elapsed(t0)})")
 
-    iceberg_table = create_table(catalog, ns, table_name, schema)
-
-    written = 0
-    pending: list[pa.Table] = [first_chunk]
-    pending_rows = first_chunk.num_rows
-    calibrated = False
-
-    while True:
-        while pending_rows < target_rows and generated < total:
-            chunk = gen_fn(generated, CHUNK_SIZE)
-            generated += chunk.num_rows
-            pending.append(chunk)
-            pending_rows += chunk.num_rows
-
-        combined = pa.concat_tables(pending)
-        pending = []
-        pending_rows = 0
-        iceberg_table.append(combined)
-        written += combined.num_rows
-        del combined
-
-        if not calibrated:
-            files = iceberg_table.inspect.data_files().to_pylist()
-            if files:
-                actual_size = files[-1]["file_size_in_bytes"]
-                actual_rows = files[-1]["record_count"]
-                if actual_size > 0 and actual_rows > 0:
-                    bytes_per_row = actual_size / actual_rows
-                    target_rows = int(TARGET_DISK_SIZE / bytes_per_row)
-                    print(f"    Refined: {bytes_per_row:.1f} disk bytes/row, "
-                          f"target {target_rows:,} rows/file")
-                calibrated = True
-
+    # Insert remaining chunks
+    while generated < total:
+        chunk = gen_fn(generated, CHUNK_SIZE)
+        generated += chunk.num_rows
+        insert_arrow_table(conn, db_name, schema, table_name, chunk)
+        written += chunk.num_rows
         pct = written * 100 // total
         print(f"    {pct:3d}% — {written:>14,}/{total:,} rows ({elapsed(t0)})")
-
-        if generated >= total:
-            break
 
     print(f"  Done: {table_name} — {written:,} rows in {elapsed(t0)}")
 
@@ -722,47 +659,31 @@ def main():
             print(f"ERROR: Organization {org_id} not found")
             sys.exit(1)
 
-    # Provision databases
-    catalogs: dict[str, RestCatalog] = {}
+    # Provision databases and create DuckLake connections
+    connections: dict[str, duckdb.DuckDBPyConnection] = {}
     for db_name, schemas in DATABASES.items():
         print(f"\nProvisioning database: {db_name}")
-        warehouse_name = create_lakekeeper_warehouse(org_id, db_name)
-        insert_org_database(engine, org_id, db_name, warehouse_name)
-        cat = get_catalog(warehouse_name)
-        catalogs[db_name] = cat
+        insert_org_database(engine, org_id, db_name)
+        duck = get_ducklake_conn(org_id, db_name)
+        connections[db_name] = duck
         for schema in schemas:
-            ensure_namespace(cat, schema)
+            duck.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_name}"."{schema}"')
+            print(f"  Ensured schema {schema}")
 
     # -----------------------------------------------------------------------
     # retail_catalog.products
     # -----------------------------------------------------------------------
-    cat = catalogs["retail_catalog"]
+    duck = connections["retail_catalog"]
+    db = "retail_catalog"
     ns = "products"
     print(f"\n--- retail_catalog.products ---")
 
-    t = time.time()
-    tbl = gen_categories()
-    it = create_table(cat, ns, "categories", tbl.schema)
-    it.append(tbl)
-    print(f"  categories: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_brands()
-    it = create_table(cat, ns, "brands", tbl.schema)
-    it.append(tbl)
-    print(f"  brands: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_suppliers()
-    it = create_table(cat, ns, "suppliers", tbl.schema)
-    it.append(tbl)
-    print(f"  suppliers: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_products()
-    it = create_table(cat, ns, "products", tbl.schema)
-    it.append(tbl)
-    print(f"  products: {tbl.num_rows:,} rows ({elapsed(t)})")
+    for name, gen_fn in [("categories", gen_categories), ("brands", gen_brands),
+                         ("suppliers", gen_suppliers), ("products", gen_products)]:
+        t = time.time()
+        tbl = gen_fn()
+        create_table_from_arrow(duck, db, ns, name, tbl)
+        print(f"  {name}: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_catalog.pricing
@@ -770,48 +691,27 @@ def main():
     ns = "pricing"
     print(f"\n--- retail_catalog.pricing ---")
 
-    t = time.time()
-    tbl = gen_price_lists()
-    it = create_table(cat, ns, "price_lists", tbl.schema)
-    it.append(tbl)
-    print(f"  price_lists: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_promotions()
-    it = create_table(cat, ns, "promotions", tbl.schema)
-    it.append(tbl)
-    print(f"  promotions: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_promotion_products()
-    it = create_table(cat, ns, "promotion_products", tbl.schema)
-    it.append(tbl)
-    print(f"  promotion_products: {tbl.num_rows:,} rows ({elapsed(t)})")
+    for name, gen_fn in [("price_lists", gen_price_lists), ("promotions", gen_promotions),
+                         ("promotion_products", gen_promotion_products)]:
+        t = time.time()
+        tbl = gen_fn()
+        create_table_from_arrow(duck, db, ns, name, tbl)
+        print(f"  {name}: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_ops.stores
     # -----------------------------------------------------------------------
-    cat = catalogs["retail_ops"]
+    duck = connections["retail_ops"]
+    db = "retail_ops"
     ns = "stores"
     print(f"\n--- retail_ops.stores ---")
 
-    t = time.time()
-    tbl = gen_regions()
-    it = create_table(cat, ns, "regions", tbl.schema)
-    it.append(tbl)
-    print(f"  regions: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_stores()
-    it = create_table(cat, ns, "stores", tbl.schema)
-    it.append(tbl)
-    print(f"  stores: {tbl.num_rows:,} rows ({elapsed(t)})")
-
-    t = time.time()
-    tbl = gen_employees()
-    it = create_table(cat, ns, "employees", tbl.schema)
-    it.append(tbl)
-    print(f"  employees: {tbl.num_rows:,} rows ({elapsed(t)})")
+    for name, gen_fn in [("regions", gen_regions), ("stores", gen_stores),
+                         ("employees", gen_employees)]:
+        t = time.time()
+        tbl = gen_fn()
+        create_table_from_arrow(duck, db, ns, name, tbl)
+        print(f"  {name}: {tbl.num_rows:,} rows ({elapsed(t)})")
 
     # -----------------------------------------------------------------------
     # retail_ops.inventory (chunked — large tables)
@@ -819,28 +719,19 @@ def main():
     ns = "inventory"
     print(f"\n--- retail_ops.inventory ---")
 
-    sample = gen_stock_levels_chunk(0, 1)
-    write_chunked(cat, ns, "stock_levels", N_STOCK_LEVELS,
-                  gen_stock_levels_chunk, sample.schema)
-
-    sample = gen_replenishment_chunk(0, 1)
-    write_chunked(cat, ns, "replenishment_orders", N_REPLENISHMENT,
-                  gen_replenishment_chunk, sample.schema)
+    write_chunked(duck, db, ns, "stock_levels", N_STOCK_LEVELS, gen_stock_levels_chunk)
+    write_chunked(duck, db, ns, "replenishment_orders", N_REPLENISHMENT, gen_replenishment_chunk)
 
     # -----------------------------------------------------------------------
     # retail_sales.customers
     # -----------------------------------------------------------------------
-    cat = catalogs["retail_sales"]
+    duck = connections["retail_sales"]
+    db = "retail_sales"
     ns = "customers"
     print(f"\n--- retail_sales.customers ---")
 
-    sample = gen_customers_chunk(0, 1)
-    write_chunked(cat, ns, "customers", N_CUSTOMERS,
-                  gen_customers_chunk, sample.schema)
-
-    sample = gen_loyalty_chunk(0, 1)
-    write_chunked(cat, ns, "loyalty_accounts", N_LOYALTY,
-                  gen_loyalty_chunk, sample.schema)
+    write_chunked(duck, db, ns, "customers", N_CUSTOMERS, gen_customers_chunk)
+    write_chunked(duck, db, ns, "loyalty_accounts", N_LOYALTY, gen_loyalty_chunk)
 
     # -----------------------------------------------------------------------
     # retail_sales.transactions (chunked — very large tables)
@@ -851,19 +742,15 @@ def main():
     else:
         print(f"\n--- retail_sales.transactions ---")
 
-        sample = gen_orders_chunk(0, 1)
-        write_chunked(cat, ns, "orders", N_ORDERS,
-                      gen_orders_chunk, sample.schema)
-
-        sample = gen_order_lines_chunk(0, 1)
-        write_chunked(cat, ns, "order_lines", N_ORDER_LINES,
-                      gen_order_lines_chunk, sample.schema)
-
-        sample = gen_payments_chunk(0, 1)
-        write_chunked(cat, ns, "payments", N_PAYMENTS,
-                      gen_payments_chunk, sample.schema)
+        write_chunked(duck, db, ns, "orders", N_ORDERS, gen_orders_chunk)
+        write_chunked(duck, db, ns, "order_lines", N_ORDER_LINES, gen_order_lines_chunk)
+        write_chunked(duck, db, ns, "payments", N_PAYMENTS, gen_payments_chunk)
 
     # -----------------------------------------------------------------------
+    # Clean up connections
+    for duck in connections.values():
+        duck.close()
+
     print(f"\n{'=' * 60}")
     print(f"All done in {elapsed(t_start)}")
     print(f"{'=' * 60}")

@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 
 from app.config import (
-    LAKEKEEPER_WORKER_URL,
+    DUCKLAKE_PG_CONNECTION,
     MAX_RESULT_ROWS,
     RESULTS_PATH,
     S3_ACCESS_KEY,
@@ -22,7 +22,7 @@ from app.config import (
     WORKER_URL,
 )
 from app.database import async_session
-from app.models import OrgDatabase, OrgView, QueryJob, WorkerVM
+from app.models import OrgDatabase, QueryJob, WorkerVM
 from app.sql_rewriter import rewrite
 
 _running_tasks: dict[str, asyncio.Task] = {}
@@ -47,19 +47,17 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
 
     from app.worker_manager import ensure_worker, wait_for_ready
 
-    # Load org databases and views
+    # Load org databases
     async with async_session() as session:
         result = await session.execute(
             select(OrgDatabase).where(OrgDatabase.org_id == org_id)
         )
         org_databases = list(result.scalars().all())
-        result = await session.execute(
-            select(OrgView).where(OrgView.org_id == org_id)
-        )
-        org_views = list(result.scalars().all())
 
-    databases = [{"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse} for d in org_databases]
-    views = [{"database": v.database, "schema_name": v.schema_name, "name": v.name, "view_sql": v.view_sql} for v in org_views]
+    databases = [
+        {"name": d.name, "data_path": d.data_path, "metadata_schema": d.metadata_schema}
+        for d in org_databases
+    ]
 
     # Ensure worker VM is ready
     await _update_job(job_id, status="provisioning")
@@ -80,9 +78,8 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
     payload = {
         "job_id": job_id,
         "sql": sql,
-        "lakekeeper_url": LAKEKEEPER_WORKER_URL,
+        "pg_connection_string": DUCKLAKE_PG_CONNECTION,
         "databases": databases,
-        "views": views,
         "s3": {
             "endpoint": S3_RESULTS_ENDPOINT,
             "access_key": S3_RESULTS_ACCESS_KEY,
@@ -174,22 +171,19 @@ async def _execute_local_worker(job_id: str, sql: str, org_id: str):
             select(OrgDatabase).where(OrgDatabase.org_id == org_id)
         )
         org_databases = list(result.scalars().all())
-        result = await session.execute(
-            select(OrgView).where(OrgView.org_id == org_id)
-        )
-        org_views = list(result.scalars().all())
 
-    databases = [{"name": d.name, "lakekeeper_warehouse": d.lakekeeper_warehouse} for d in org_databases]
-    views = [{"database": v.database, "schema_name": v.schema_name, "name": v.name, "view_sql": v.view_sql} for v in org_views]
+    databases = [
+        {"name": d.name, "data_path": d.data_path, "metadata_schema": d.metadata_schema}
+        for d in org_databases
+    ]
 
     result_path = _result_path(job_id)
 
     payload = {
         "job_id": job_id,
         "sql": sql,
-        "lakekeeper_url": LAKEKEEPER_WORKER_URL,
+        "pg_connection_string": DUCKLAKE_PG_CONNECTION,
         "databases": databases,
-        "views": views,
         "s3": {
             "endpoint": S3_ENDPOINT,
             "access_key": S3_ACCESS_KEY,

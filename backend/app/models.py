@@ -137,22 +137,9 @@ class OrgDatabase(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
-    lakekeeper_warehouse: Mapped[str] = mapped_column(String(255))
+    data_path: Mapped[str] = mapped_column(String(512))
+    metadata_schema: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class OrgView(Base):
-    __tablename__ = "org_views"
-    __table_args__ = (UniqueConstraint("org_id", "database", "schema_name", "name"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), index=True)
-    database: Mapped[str] = mapped_column(String(255))
-    schema_name: Mapped[str] = mapped_column(String(255))
-    name: Mapped[str] = mapped_column(String(255))
-    view_sql: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class ShellProvision(Base):

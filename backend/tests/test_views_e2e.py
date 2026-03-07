@@ -35,8 +35,8 @@ class TestSqlEditorViewLifecycle:
         status, data, _ = submit_and_wait(
             api, f"CREATE VIEW development.{SCHEMA}.e2e_test_view AS SELECT 42 AS answer, 'hello' AS greeting"
         )
-        assert status == "ddl"
-        assert "created" in data["ddl_message"]
+        assert status == "completed"
+
 
     def test_query_simple_view(self, api):
         status, job, results = submit_and_wait(
@@ -50,7 +50,7 @@ class TestSqlEditorViewLifecycle:
         status, data, _ = submit_and_wait(
             api, f"CREATE OR REPLACE VIEW development.{SCHEMA}.e2e_test_view AS SELECT 99 AS answer"
         )
-        assert status == "ddl"
+        assert status == "completed"
 
     def test_query_replaced_view(self, api):
         status, job, results = submit_and_wait(
@@ -64,8 +64,8 @@ class TestSqlEditorViewLifecycle:
         status, data, _ = submit_and_wait(
             api, f"DROP VIEW development.{SCHEMA}.e2e_test_view"
         )
-        assert status == "ddl"
-        assert "dropped" in data["ddl_message"]
+        assert status == "completed"
+
 
     def test_query_dropped_view_fails(self, api):
         status, job, _ = submit_and_wait(
@@ -84,7 +84,7 @@ class TestCrossDatabaseView:
             f"CREATE VIEW development.{SCHEMA}.e2e_cross_db AS "
             "SELECT customer_id, tier FROM retail_sales.customers.loyalty_accounts LIMIT 5",
         )
-        assert status == "ddl"
+        assert status == "completed"
 
     def test_query_cross_db_view(self, api):
         status, job, results = submit_and_wait(
@@ -99,7 +99,7 @@ class TestCrossDatabaseView:
         status, _, _ = submit_and_wait(
             api, f"DROP VIEW development.{SCHEMA}.e2e_cross_db"
         )
-        assert status == "ddl"
+        assert status == "completed"
 
 
 class TestViewWithRealTableData:
@@ -111,7 +111,7 @@ class TestViewWithRealTableData:
             f"CREATE VIEW development.{SCHEMA}.e2e_brand_count AS "
             "SELECT count(*) AS cnt FROM retail_catalog.products.brands",
         )
-        assert status == "ddl"
+        assert status == "completed"
 
     def test_query_aggregation_view(self, api):
         status, job, results = submit_and_wait(
@@ -125,7 +125,7 @@ class TestViewWithRealTableData:
         status, _, _ = submit_and_wait(
             api, f"DROP VIEW development.{SCHEMA}.e2e_brand_count"
         )
-        assert status == "ddl"
+        assert status == "completed"
 
 
 class TestViewInCatalogSidebar:

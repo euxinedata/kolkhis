@@ -36,7 +36,7 @@ S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "minioadmin")
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "minioadmin")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "warehouse")
-# S3 endpoint as seen from Lakekeeper (docker-internal); defaults to S3_ENDPOINT
+# S3 internal endpoint (docker-internal); defaults to S3_ENDPOINT
 S3_INTERNAL_ENDPOINT = os.environ.get("S3_INTERNAL_ENDPOINT", S3_ENDPOINT)
 
 
@@ -64,10 +64,13 @@ S3_RESULTS_ACCESS_KEY = os.environ.get("S3_RESULTS_ACCESS_KEY", S3_ACCESS_KEY)
 S3_RESULTS_SECRET_KEY = os.environ.get("S3_RESULTS_SECRET_KEY", S3_SECRET_KEY)
 S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
 
-# Lakekeeper Iceberg REST catalog
-LAKEKEEPER_URL = os.environ.get("LAKEKEEPER_URL", "http://localhost:8181")
-# Lakekeeper URL as seen from worker VMs (for remote mode); defaults to LAKEKEEPER_URL
-LAKEKEEPER_WORKER_URL = os.environ.get("LAKEKEEPER_WORKER_URL", LAKEKEEPER_URL)
+# DuckLake PostgreSQL connection string for worker ATTACH
+# Derived from existing PG vars; can be overridden for remote workers
+DUCKLAKE_PG_CONNECTION = os.environ.get(
+    "DUCKLAKE_PG_CONNECTION",
+    f"dbname={POSTGRES_DB} host={POSTGRES_HOST} port={POSTGRES_PORT} "
+    f"user={POSTGRES_USER} password={POSTGRES_PASSWORD}",
+)
 
 # Gitea configuration
 GITEA_URL = os.environ.get("GITEA_URL", "http://gitea:3000")

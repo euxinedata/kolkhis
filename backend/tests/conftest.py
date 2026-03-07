@@ -1,6 +1,6 @@
 """Shared fixtures and helpers for E2E tests.
 
-Requires: backend (port 8000), worker (port 8080), PostgreSQL, Lakekeeper, MinIO.
+Requires: backend (port 8000), worker (port 8080), PostgreSQL, MinIO.
 All E2E tests skip gracefully if services aren't running.
 """
 
