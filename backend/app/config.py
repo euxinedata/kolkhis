@@ -64,12 +64,15 @@ S3_RESULTS_ACCESS_KEY = os.environ.get("S3_RESULTS_ACCESS_KEY", S3_ACCESS_KEY)
 S3_RESULTS_SECRET_KEY = os.environ.get("S3_RESULTS_SECRET_KEY", S3_SECRET_KEY)
 S3_RESULTS_REGION = os.environ.get("S3_RESULTS_REGION", S3_REGION)
 
-# DuckLake PostgreSQL connection string for worker ATTACH
-# Derived from existing PG vars; can be overridden for remote workers
+# DuckLake PostgreSQL connection string (in-cluster / local)
 DUCKLAKE_PG_CONNECTION = os.environ.get(
     "DUCKLAKE_PG_CONNECTION",
     f"dbname={POSTGRES_DB} host={POSTGRES_HOST} port={POSTGRES_PORT} "
     f"user={POSTGRES_USER} password={POSTGRES_PASSWORD}",
+)
+# DuckLake PG connection as seen from remote worker VMs (defaults to in-cluster)
+DUCKLAKE_WORKER_PG_CONNECTION = os.environ.get(
+    "DUCKLAKE_WORKER_PG_CONNECTION", DUCKLAKE_PG_CONNECTION,
 )
 
 # Gitea configuration
