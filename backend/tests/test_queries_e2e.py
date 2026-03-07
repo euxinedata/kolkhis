@@ -101,6 +101,81 @@ class TestResultPagination:
         assert "page_size" in results
 
 
+class TestWindowFunctions:
+    """Window functions against DuckLake tables."""
+
+    def test_row_number(self, api):
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT brand_id, name, "
+            "ROW_NUMBER() OVER (ORDER BY brand_id) AS rn "
+            "FROM retail_catalog.products.brands LIMIT 5",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert "rn" in results["columns"]
+        # ROW_NUMBER should produce sequential integers
+        rns = [r["rn"] for r in results["rows"]]
+        assert rns == list(range(1, 6))
+
+    def test_rank_and_dense_rank(self, api):
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT brand_id, country_of_origin, "
+            "RANK() OVER (ORDER BY country_of_origin) AS rnk, "
+            "DENSE_RANK() OVER (ORDER BY country_of_origin) AS drnk "
+            "FROM retail_catalog.products.brands LIMIT 10",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert "rnk" in results["columns"]
+        assert "drnk" in results["columns"]
+        # DENSE_RANK should be <= RANK for every row
+        for r in results["rows"]:
+            assert r["drnk"] <= r["rnk"]
+
+    def test_lag_and_lead(self, api):
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT brand_id, name, "
+            "LAG(name) OVER (ORDER BY brand_id) AS prev_name, "
+            "LEAD(name) OVER (ORDER BY brand_id) AS next_name "
+            "FROM retail_catalog.products.brands "
+            "ORDER BY brand_id LIMIT 3",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        # First row's LAG should be NULL (no preceding row)
+        assert results["rows"][0]["prev_name"] is None
+        # Second row's LAG should be the first row's name
+        assert results["rows"][1]["prev_name"] == results["rows"][0]["name"]
+        # First row's LEAD should be the second row's name
+        assert results["rows"][0]["next_name"] == results["rows"][1]["name"]
+
+    def test_running_sum(self, api):
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT brand_id, "
+            "SUM(brand_id) OVER (ORDER BY brand_id "
+            "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_sum "
+            "FROM retail_catalog.products.brands "
+            "ORDER BY brand_id LIMIT 4",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        # Running sum: 1, 1+2=3, 1+2+3=6, 1+2+3+4=10
+        sums = [r["running_sum"] for r in results["rows"]]
+        assert sums == [1, 3, 6, 10]
+
+    def test_partition_by(self, api):
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT brand_id, country_of_origin, "
+            "ROW_NUMBER() OVER (PARTITION BY country_of_origin ORDER BY brand_id) AS rn "
+            "FROM retail_catalog.products.brands LIMIT 10",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert "rn" in results["columns"]
+        # All rn values should be >= 1
+        assert all(r["rn"] >= 1 for r in results["rows"])
+
+
 class TestCreateTableViaEditor:
     """CREATE TABLE via SQL editor must land in DuckLake (visible in catalog)."""
 

@@ -1,8 +1,8 @@
 """End-to-end view tests against running services.
 
-Requires: backend (port 8000), worker (port 8080), PostgreSQL, Lakekeeper, MinIO.
+Requires: backend (port 8000), worker (port 8080), PostgreSQL, MinIO.
 Tests the actual user flows: CREATE VIEW -> query -> DROP VIEW through the real
-API endpoints, hitting real PostgreSQL storage and real Iceberg databases.
+API endpoints, hitting real DuckLake storage.
 
 Run: cd backend && uv run pytest tests/test_views_e2e.py -v
 """
@@ -163,4 +163,81 @@ class TestViewInCatalogSidebar:
 
         submit_and_wait(
             api, f"DROP VIEW development.{SCHEMA}.e2e_schema_test"
+        )
+
+
+class TestViewDependency:
+    """View dependency behavior when the underlying table is dropped."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, api):
+        yield
+        safe_cleanup(api, f"DROP VIEW development.{SCHEMA}.e2e_dep_view")
+        safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_dep_tbl")
+
+    def test_drop_table_with_dependent_view(self, api):
+        """DROP TABLE succeeds even when a view depends on it."""
+        submit_and_wait(
+            api,
+            f"CREATE TABLE development.{SCHEMA}.e2e_dep_tbl AS SELECT 1 AS id, 'x' AS val",
+        )
+        submit_and_wait(
+            api,
+            f"CREATE VIEW development.{SCHEMA}.e2e_dep_view "
+            f"AS SELECT id FROM development.{SCHEMA}.e2e_dep_tbl",
+        )
+
+        # DuckLake allows dropping the table without CASCADE
+        status, job, _ = submit_and_wait(
+            api, f"DROP TABLE development.{SCHEMA}.e2e_dep_tbl"
+        )
+        assert status == "completed", f"DROP TABLE failed: {job.get('error')}"
+
+    def test_orphan_view_query_fails(self, api):
+        """Querying a view whose base table was dropped gives a clear error."""
+        submit_and_wait(
+            api,
+            f"CREATE TABLE development.{SCHEMA}.e2e_dep_tbl AS SELECT 1 AS id",
+        )
+        submit_and_wait(
+            api,
+            f"CREATE VIEW development.{SCHEMA}.e2e_dep_view "
+            f"AS SELECT id FROM development.{SCHEMA}.e2e_dep_tbl",
+        )
+        submit_and_wait(
+            api, f"DROP TABLE development.{SCHEMA}.e2e_dep_tbl"
+        )
+
+        # Querying the orphan view should fail
+        status, job, _ = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_dep_view"
+        )
+        assert status == "failed", "Orphan view query should fail"
+        assert "e2e_dep_tbl" in job["error"], (
+            f"Error should mention missing table: {job['error']}"
+        )
+
+    def test_orphan_view_still_in_catalog(self, api):
+        """An orphaned view still appears in the catalog (not silently removed)."""
+        submit_and_wait(
+            api,
+            f"CREATE TABLE development.{SCHEMA}.e2e_dep_tbl AS SELECT 1 AS id",
+        )
+        submit_and_wait(
+            api,
+            f"CREATE VIEW development.{SCHEMA}.e2e_dep_view "
+            f"AS SELECT id FROM development.{SCHEMA}.e2e_dep_tbl",
+        )
+        submit_and_wait(
+            api, f"DROP TABLE development.{SCHEMA}.e2e_dep_tbl"
+        )
+
+        # View should still be listed in catalog
+        resp = api.get(
+            f"/api/catalog/databases/development/schemas/{SCHEMA}/objects"
+        )
+        resp.raise_for_status()
+        names = [o["name"] for o in resp.json()["objects"]]
+        assert "e2e_dep_view" in names, (
+            f"Orphan view disappeared from catalog: {names}"
         )
