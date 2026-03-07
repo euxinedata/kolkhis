@@ -193,7 +193,7 @@ def get_ducklake_conn(org_id: str, db_name: str) -> duckdb.DuckDBPyConnection:
             REGION '{S3_REGION}',
             ENDPOINT '{S3_ENDPOINT.replace("http://", "").replace("https://", "")}',
             URL_STYLE 'path',
-            USE_SSL false
+            USE_SSL {'true' if S3_ENDPOINT.startswith('https://') else 'false'}
         )
     """)
     data_path = ducklake_data_path(org_id, db_name)
