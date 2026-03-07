@@ -38,6 +38,25 @@ async def lifespan(app: FastAPI):
         os.makedirs(WAREHOUSE_PATH, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Run Alembic migrations to bring schema up to date
+    from alembic.config import Config
+    from alembic import command
+    from alembic.runtime.migration import MigrationContext
+    from sqlalchemy import create_engine
+    from app.config import DATABASE_URL_SYNC
+    sync_engine = create_engine(DATABASE_URL_SYNC)
+    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    with sync_engine.connect() as conn:
+        ctx = MigrationContext.configure(conn)
+        current_rev = ctx.get_current_revision()
+    sync_engine.dispose()
+    if current_rev is None:
+        # Fresh DB — tables already created by create_all, just stamp
+        command.stamp(alembic_cfg, "head")
+    else:
+        command.upgrade(alembic_cfg, "head")
+
     async with async_session() as session:
         await seed_countries(session)
     async with async_session() as session:
