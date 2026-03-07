@@ -69,11 +69,30 @@ def setup_ducklake_catalog(
         logger.info("Attached DuckLake database: %s (schema=%s)", db_name, metadata_schema)
 
 
+def _strip_comments(sql: str) -> str:
+    """Strip leading block comments (e.g. dbt's /* {"app": "dbt", ...} */ prefix)."""
+    s = sql.strip()
+    while s.startswith("/*"):
+        end = s.find("*/")
+        if end == -1:
+            break
+        s = s[end + 2 :].strip()
+    return s
+
+
 def _classify_sql(sql: str) -> str:
-    """Classify SQL as 'query' (can be wrapped in CTAS) or 'command' (execute directly)."""
-    normalized = sql.strip().upper()
+    """Classify SQL for execution strategy.
+
+    Returns:
+        "query"      — SELECT/WITH/VALUES/FROM: wrappable in CTAS for result capture
+        "result_set" — SHOW/DESCRIBE: returns rows but can't be wrapped in CTAS
+        "command"    — DML/DDL: execute directly, capture rows_affected
+    """
+    normalized = _strip_comments(sql).upper()
     if normalized.startswith(("SELECT", "WITH", "VALUES", "FROM")):
         return "query"
+    if normalized.startswith(("SHOW", "DESCRIBE")):
+        return "result_set"
     return "command"
 
 
@@ -106,7 +125,9 @@ def execute_query(
 
         sql = sql.strip().rstrip(";").strip()
 
-        if _classify_sql(sql) == "query":
+        sql_type = _classify_sql(sql)
+
+        if sql_type == "query":
             if not re.search(
                 r"\bLIMIT\s+\d+(\s+OFFSET\s+\d+)?\s*$", sql, re.IGNORECASE
             ):
@@ -115,6 +136,22 @@ def execute_query(
             conn.execute(f"CREATE TEMP TABLE _results AS {sql}")
             row_count = conn.execute("SELECT count(*) FROM _results").fetchone()[0]
             conn.execute(f"COPY _results TO '{result_path}' (FORMAT PARQUET)")
+        elif sql_type == "result_set":
+            # SHOW/DESCRIBE return rows but can't be wrapped in CTAS.
+            # Fetch into Arrow, register as virtual table, then COPY via DuckDB.
+            result = conn.execute(sql)
+            arrow = result.arrow().read_all()
+            conn.register("_results", arrow)
+            row_count = arrow.num_rows
+            if row_count > max_result_rows:
+                conn.execute(
+                    f"COPY (SELECT * FROM _results LIMIT {max_result_rows}) "
+                    f"TO '{result_path}' (FORMAT PARQUET)"
+                )
+                row_count = max_result_rows
+            else:
+                conn.execute(f"COPY _results TO '{result_path}' (FORMAT PARQUET)")
+            conn.unregister("_results")
         else:
             result = conn.execute(sql)
             rows_affected = -1
