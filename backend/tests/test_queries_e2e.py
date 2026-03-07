@@ -1,4 +1,4 @@
-"""E2E tests for regular SELECT queries through the worker against real Iceberg tables.
+"""E2E tests for queries through the SQL editor (job-based worker path).
 
 Run: cd backend && uv run pytest tests/test_queries_e2e.py -v
 """
@@ -7,7 +7,7 @@ from conftest import SCHEMA, safe_cleanup, submit_and_wait
 
 
 class TestSimpleQueries:
-    """Basic SELECT queries against real Iceberg tables."""
+    """Basic SELECT queries against DuckLake tables."""
 
     def test_simple_select(self, api):
         status, job, results = submit_and_wait(
@@ -102,10 +102,10 @@ class TestResultPagination:
 
 
 class TestCreateTableViaEditor:
-    """CREATE TABLE via SQL editor must land in Iceberg (visible in catalog)."""
+    """CREATE TABLE via SQL editor must land in DuckLake (visible in catalog)."""
 
     def test_create_table_appears_in_catalog(self, api):
-        """CREATE TABLE AS SELECT via SQL editor should persist in Iceberg."""
+        """CREATE TABLE AS SELECT via SQL editor should persist in DuckLake."""
         try:
             status, job, _ = submit_and_wait(
                 api,
@@ -114,7 +114,7 @@ class TestCreateTableViaEditor:
             )
             assert status == "completed", f"Expected completed, got {job.get('error')}"
 
-            # Table must be visible in the catalog (Iceberg), not ephemeral
+            # Table must be visible in the catalog, not ephemeral
             resp = api.get(
                 f"/api/catalog/databases/development/schemas/{SCHEMA}/objects"
             )
@@ -122,9 +122,178 @@ class TestCreateTableViaEditor:
             objects = resp.json()["objects"]
             names = [o["name"] for o in objects]
             assert "e2e_editor_tbl" in names, (
-                f"Table not in catalog — went to in-memory overlay. Objects: {names}"
+                f"Table not in catalog. Objects: {names}"
             )
         finally:
             safe_cleanup(
                 api, f"DROP TABLE development.{SCHEMA}.e2e_editor_tbl"
             )
+
+
+class TestDmlPersistenceViaEditor:
+    """DML via SQL editor (job-based path) must persist across connections.
+
+    Each SQL editor query gets its own ephemeral DuckDB connection that
+    ATTACHes DuckLake, executes, then disconnects. DML must persist because
+    DuckLake writes to PostgreSQL metadata + S3 Parquet — but this needs
+    verification since each job is a separate connection.
+    """
+
+    def test_insert_persists_across_jobs(self, api):
+        """INSERT via SQL editor persists and is readable in a subsequent job."""
+        try:
+            # Job 1: Create table
+            status, job, _ = submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_editor_insert "
+                f"AS SELECT 1 AS id, 'first' AS val",
+            )
+            assert status == "completed", f"CREATE failed: {job.get('error')}"
+
+            # Job 2: INSERT (separate connection)
+            status, job, _ = submit_and_wait(
+                api,
+                f"INSERT INTO development.{SCHEMA}.e2e_editor_insert "
+                f"VALUES (2, 'second')",
+            )
+            assert status == "completed", f"INSERT failed: {job.get('error')}"
+
+            # Job 3: Verify (yet another connection)
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_editor_insert ORDER BY id",
+            )
+            assert status == "completed", f"SELECT failed: {job.get('error')}"
+            assert len(results["rows"]) == 2, (
+                f"Expected 2 rows after INSERT, got {len(results['rows'])}"
+            )
+            assert results["rows"][0]["id"] == 1
+            assert results["rows"][1]["id"] == 2
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_insert")
+
+    def test_update_persists_across_jobs(self, api):
+        """UPDATE via SQL editor persists and is readable in a subsequent job."""
+        try:
+            # Job 1: Create table
+            status, job, _ = submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_editor_update "
+                f"AS SELECT * FROM (VALUES (1, 'old'), (2, 'keep')) AS t(id, val)",
+            )
+            assert status == "completed", f"CREATE failed: {job.get('error')}"
+
+            # Job 2: UPDATE (separate connection)
+            status, job, _ = submit_and_wait(
+                api,
+                f"UPDATE development.{SCHEMA}.e2e_editor_update "
+                f"SET val = 'new' WHERE id = 1",
+            )
+            assert status == "completed", f"UPDATE failed: {job.get('error')}"
+
+            # Job 3: Verify
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_editor_update ORDER BY id",
+            )
+            assert status == "completed", f"SELECT failed: {job.get('error')}"
+            assert len(results["rows"]) == 2
+            rows_by_id = {r["id"]: r["val"] for r in results["rows"]}
+            assert rows_by_id[1] == "new", f"Row 1 not updated: {rows_by_id}"
+            assert rows_by_id[2] == "keep", f"Row 2 changed unexpectedly: {rows_by_id}"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_update")
+
+    def test_delete_persists_across_jobs(self, api):
+        """DELETE via SQL editor persists and is readable in a subsequent job."""
+        try:
+            # Job 1: Create table with 3 rows
+            status, job, _ = submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_editor_delete "
+                f"AS SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (3, 'c')) AS t(id, val)",
+            )
+            assert status == "completed", f"CREATE failed: {job.get('error')}"
+
+            # Job 2: DELETE (separate connection)
+            status, job, _ = submit_and_wait(
+                api,
+                f"DELETE FROM development.{SCHEMA}.e2e_editor_delete WHERE id = 2",
+            )
+            assert status == "completed", f"DELETE failed: {job.get('error')}"
+
+            # Job 3: Verify
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_editor_delete ORDER BY id",
+            )
+            assert status == "completed", f"SELECT failed: {job.get('error')}"
+            assert len(results["rows"]) == 2, (
+                f"Expected 2 rows after DELETE, got {len(results['rows'])}"
+            )
+            ids = [r["id"] for r in results["rows"]]
+            assert ids == [1, 3], f"Wrong rows after DELETE: {ids}"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_delete")
+
+    def test_merge_persists_across_jobs(self, api):
+        """MERGE via SQL editor persists and is readable in a subsequent job."""
+        try:
+            # Job 1: Create table
+            status, job, _ = submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_editor_merge "
+                f"AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, val)",
+            )
+            assert status == "completed", f"CREATE failed: {job.get('error')}"
+
+            # Job 2: MERGE (separate connection)
+            status, job, _ = submit_and_wait(
+                api,
+                f"MERGE INTO development.{SCHEMA}.e2e_editor_merge AS target "
+                f"USING (SELECT * FROM (VALUES (2, 'updated'), (3, 'new')) AS t(id, val)) AS source "
+                f"ON target.id = source.id "
+                f"WHEN MATCHED THEN UPDATE SET val = source.val "
+                f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+            )
+            assert status == "completed", f"MERGE failed: {job.get('error')}"
+
+            # Job 3: Verify
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_editor_merge ORDER BY id",
+            )
+            assert status == "completed", f"SELECT failed: {job.get('error')}"
+            assert len(results["rows"]) == 3
+            rows_by_id = {r["id"]: r["val"] for r in results["rows"]}
+            assert rows_by_id[1] == "a"
+            assert rows_by_id[2] == "updated"
+            assert rows_by_id[3] == "new"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_merge")
+
+    def test_multiple_inserts_accumulate(self, api):
+        """Multiple INSERT jobs accumulate rows correctly."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_editor_multi "
+                f"AS SELECT 1 AS id",
+            )
+
+            for i in range(2, 5):
+                status, job, _ = submit_and_wait(
+                    api,
+                    f"INSERT INTO development.{SCHEMA}.e2e_editor_multi VALUES ({i})",
+                )
+                assert status == "completed", f"INSERT {i} failed: {job.get('error')}"
+
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_editor_multi ORDER BY id",
+            )
+            assert status == "completed"
+            ids = [r["id"] for r in results["rows"]]
+            assert ids == [1, 2, 3, 4], f"Expected [1,2,3,4], got {ids}"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_multi")
