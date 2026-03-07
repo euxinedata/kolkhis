@@ -2,9 +2,9 @@
 
 Run: cd backend && uv run pytest tests/test_dml_e2e.py -v
 
-These tests verify that INSERT INTO, DELETE FROM, and UPDATE work correctly
-through the dbt session proxy against DuckLake tables. Each test creates
-resources, performs DML, and verifies via:
+These tests verify that INSERT INTO, DELETE FROM, UPDATE, and MERGE work
+correctly through the dbt session proxy against DuckLake tables. Each test
+creates resources, performs DML, and verifies via:
 - Catalog API (proves data landed in DuckLake)
 - Cross-connection queries (proves persistence across sessions)
 """
@@ -37,6 +37,8 @@ def cleanup_dml_resources(api):
     safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_snapshot")
     safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_delete_target")
     safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_update_target")
+    safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_merge_target")
+    safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_merge_src")
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +232,176 @@ class TestUpdate:
         rows_by_id = {r["id"]: r for r in results["rows"]}
         assert rows_by_id[1]["status"] == "closed"
         assert rows_by_id[2]["status"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# MERGE (dbt upsert pattern)
+# ---------------------------------------------------------------------------
+class TestMerge:
+    """MERGE INTO target USING source ON ... WHEN MATCHED/NOT MATCHED ...
+
+    Used by dbt incremental models with merge strategy (the default for
+    unique_key configs). DuckLake supports MERGE natively.
+    """
+
+    def test_merge_upsert(self, api, dbt_session):
+        """MERGE updates existing rows and inserts new ones."""
+        # Create target with initial data
+        result = dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'old_a'), (2, 'old_b')) AS t(id, val)",
+        )
+        assert result["status"] == "completed"
+
+        # MERGE: update id=2, insert id=3, leave id=1 unchanged
+        result = dbt_query(
+            api, dbt_session,
+            f"MERGE INTO development.{SCHEMA}.e2e_merge_target AS target "
+            f"USING (SELECT * FROM (VALUES (2, 'new_b'), (3, 'new_c')) AS t(id, val)) AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN UPDATE SET val = source.val "
+            f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+        )
+        assert result["status"] == "completed", f"MERGE failed: {result.get('error')}"
+
+        # Verify via cross-connection (SQL editor)
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target ORDER BY id"
+        )
+        assert status == "completed", f"Query failed: {job.get('error')}"
+        assert len(results["rows"]) == 3
+        rows_by_id = {r["id"]: r["val"] for r in results["rows"]}
+        assert rows_by_id[1] == "old_a", f"Row 1 should be unchanged: {rows_by_id}"
+        assert rows_by_id[2] == "new_b", f"Row 2 should be updated: {rows_by_id}"
+        assert rows_by_id[3] == "new_c", f"Row 3 should be inserted: {rows_by_id}"
+
+    def test_merge_delete_matched(self, api, dbt_session):
+        """MERGE with WHEN MATCHED THEN DELETE removes matching rows."""
+        # Drop and recreate target (reuse from previous test)
+        dbt_query(api, dbt_session, f"DROP TABLE IF EXISTS development.{SCHEMA}.e2e_merge_target")
+        result = dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (3, 'c')) AS t(id, val)",
+        )
+        assert result["status"] == "completed"
+
+        # MERGE: delete ids 1 and 2
+        result = dbt_query(
+            api, dbt_session,
+            f"MERGE INTO development.{SCHEMA}.e2e_merge_target AS target "
+            f"USING (SELECT * FROM (VALUES (1), (2)) AS t(id)) AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN DELETE",
+        )
+        assert result["status"] == "completed", f"MERGE DELETE failed: {result.get('error')}"
+
+        # Only row 3 should remain
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target ORDER BY id"
+        )
+        assert status == "completed", f"Query failed: {job.get('error')}"
+        assert len(results["rows"]) == 1
+        assert results["rows"][0]["id"] == 3
+
+    def test_merge_from_table_source(self, api, dbt_session):
+        """MERGE using a real table as source (not inline VALUES)."""
+        # Recreate target
+        dbt_query(api, dbt_session, f"DROP TABLE IF EXISTS development.{SCHEMA}.e2e_merge_target")
+        result = dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'v1'), (2, 'v2')) AS t(id, val)",
+        )
+        assert result["status"] == "completed"
+
+        # Create source table (like dbt __dbt_tmp)
+        result = dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_src "
+            f"AS SELECT * FROM (VALUES (2, 'updated'), (4, 'new')) AS t(id, val)",
+        )
+        assert result["status"] == "completed"
+
+        # MERGE from table
+        result = dbt_query(
+            api, dbt_session,
+            f"MERGE INTO development.{SCHEMA}.e2e_merge_target AS target "
+            f"USING development.{SCHEMA}.e2e_merge_src AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN UPDATE SET val = source.val "
+            f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+        )
+        assert result["status"] == "completed", f"MERGE failed: {result.get('error')}"
+
+        # Verify: 3 rows — id=1 unchanged, id=2 updated, id=4 inserted
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target ORDER BY id"
+        )
+        assert status == "completed", f"Query failed: {job.get('error')}"
+        assert len(results["rows"]) == 3
+        rows_by_id = {r["id"]: r["val"] for r in results["rows"]}
+        assert rows_by_id[1] == "v1"
+        assert rows_by_id[2] == "updated"
+        assert rows_by_id[4] == "new"
+
+        # Cleanup source
+        dbt_query(api, dbt_session, f"DROP TABLE development.{SCHEMA}.e2e_merge_src")
+
+    def test_merge_all_matched(self, api, dbt_session):
+        """MERGE where all source rows match — pure update, no inserts."""
+        dbt_query(api, dbt_session, f"DROP TABLE IF EXISTS development.{SCHEMA}.e2e_merge_target")
+        dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS t(id, val)",
+        )
+
+        result = dbt_query(
+            api, dbt_session,
+            f"MERGE INTO development.{SCHEMA}.e2e_merge_target AS target "
+            f"USING (SELECT * FROM (VALUES (1, 'x'), (2, 'y')) AS t(id, val)) AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN UPDATE SET val = source.val "
+            f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+        )
+        assert result["status"] == "completed"
+
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target ORDER BY id"
+        )
+        assert status == "completed"
+        assert len(results["rows"]) == 2
+        assert results["rows"][0]["val"] == "x"
+        assert results["rows"][1]["val"] == "y"
+
+    def test_merge_no_matches(self, api, dbt_session):
+        """MERGE where no source rows match — pure insert."""
+        dbt_query(api, dbt_session, f"DROP TABLE IF EXISTS development.{SCHEMA}.e2e_merge_target")
+        dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'a')) AS t(id, val)",
+        )
+
+        result = dbt_query(
+            api, dbt_session,
+            f"MERGE INTO development.{SCHEMA}.e2e_merge_target AS target "
+            f"USING (SELECT * FROM (VALUES (10, 'new1'), (20, 'new2')) AS t(id, val)) AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN UPDATE SET val = source.val "
+            f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+        )
+        assert result["status"] == "completed"
+
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target ORDER BY id"
+        )
+        assert status == "completed"
+        assert len(results["rows"]) == 3
+        ids = [r["id"] for r in results["rows"]]
+        assert ids == [1, 10, 20]
 
 
 # ---------------------------------------------------------------------------
