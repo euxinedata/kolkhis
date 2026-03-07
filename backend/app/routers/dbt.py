@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
 from app.config import (
-    DUCKLAKE_PG_CONNECTION,
+    DUCKLAKE_WORKER_PG_CONNECTION,
     S3_ACCESS_KEY,
     S3_ENDPOINT,
     S3_REGION,
@@ -102,7 +102,7 @@ async def create_session(
     worker_url = await _get_worker_url(user_id)
 
     payload = {
-        "pg_connection_string": DUCKLAKE_PG_CONNECTION,
+        "pg_connection_string": DUCKLAKE_WORKER_PG_CONNECTION,
         "databases": databases,
         "s3": {
             "endpoint": S3_ENDPOINT,

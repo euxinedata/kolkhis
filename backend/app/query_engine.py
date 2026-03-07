@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 
 from app.config import (
     DUCKLAKE_PG_CONNECTION,
+    DUCKLAKE_WORKER_PG_CONNECTION,
     MAX_RESULT_ROWS,
     RESULTS_PATH,
     S3_ACCESS_KEY,
@@ -78,7 +79,7 @@ async def _execute_remote(job_id: str, sql: str, user_id: int, org_id: str):
     payload = {
         "job_id": job_id,
         "sql": sql,
-        "pg_connection_string": DUCKLAKE_PG_CONNECTION,
+        "pg_connection_string": DUCKLAKE_WORKER_PG_CONNECTION,
         "databases": databases,
         "s3": {
             "endpoint": S3_RESULTS_ENDPOINT,
