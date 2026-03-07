@@ -39,6 +39,7 @@ def cleanup_dbt_resources(api):
     safe_cleanup(api, "DROP SCHEMA development.e2e_dbt_test")
     safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_dbt_commented")
     safe_cleanup(api, f"DROP VIEW development.{SCHEMA}.e2e_dbt_commented_vw")
+    safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_dbt_comment_dml")
 
 
 class TestDbtSessionLifecycle:
@@ -254,4 +255,83 @@ class TestDbtCommentPrefix:
         dbt_query(
             api, self.session_id,
             f'{DBT_COMMENT}DROP VIEW development.{SCHEMA}.e2e_dbt_commented_vw',
+        )
+
+    def test_insert_with_comment(self, api):
+        """INSERT with dbt comment prefix works correctly."""
+        # Create table first
+        dbt_query(
+            api, self.session_id,
+            f'{DBT_COMMENT}CREATE TABLE development.{SCHEMA}.e2e_dbt_comment_dml '
+            f"AS SELECT 1 AS id, 'init' AS val",
+        )
+
+        # INSERT with comment
+        result = dbt_query(
+            api, self.session_id,
+            f'{DBT_COMMENT}INSERT INTO development.{SCHEMA}.e2e_dbt_comment_dml '
+            f"VALUES (2, 'inserted')",
+        )
+        assert result["status"] == "completed", f"INSERT with comment failed: {result.get('error')}"
+
+        # Verify
+        result = dbt_query(
+            api, self.session_id,
+            f'SELECT count(*) AS cnt FROM development.{SCHEMA}.e2e_dbt_comment_dml',
+        )
+        assert result["rows"][0][0] == 2
+
+    def test_update_with_comment(self, api):
+        """UPDATE with dbt comment prefix works correctly."""
+        result = dbt_query(
+            api, self.session_id,
+            f"{DBT_COMMENT}UPDATE development.{SCHEMA}.e2e_dbt_comment_dml "
+            f"SET val = 'updated' WHERE id = 1",
+        )
+        assert result["status"] == "completed", f"UPDATE with comment failed: {result.get('error')}"
+
+        result = dbt_query(
+            api, self.session_id,
+            f"SELECT val FROM development.{SCHEMA}.e2e_dbt_comment_dml WHERE id = 1",
+        )
+        assert result["rows"][0][0] == "updated"
+
+    def test_delete_with_comment(self, api):
+        """DELETE with dbt comment prefix works correctly."""
+        result = dbt_query(
+            api, self.session_id,
+            f"{DBT_COMMENT}DELETE FROM development.{SCHEMA}.e2e_dbt_comment_dml WHERE id = 2",
+        )
+        assert result["status"] == "completed", f"DELETE with comment failed: {result.get('error')}"
+
+        result = dbt_query(
+            api, self.session_id,
+            f"SELECT count(*) AS cnt FROM development.{SCHEMA}.e2e_dbt_comment_dml",
+        )
+        assert result["rows"][0][0] == 1
+
+    def test_merge_with_comment(self, api):
+        """MERGE with dbt comment prefix works correctly."""
+        result = dbt_query(
+            api, self.session_id,
+            f"{DBT_COMMENT}MERGE INTO development.{SCHEMA}.e2e_dbt_comment_dml AS target "
+            f"USING (SELECT * FROM (VALUES (1, 'merged'), (3, 'new')) AS t(id, val)) AS source "
+            f"ON target.id = source.id "
+            f"WHEN MATCHED THEN UPDATE SET val = source.val "
+            f"WHEN NOT MATCHED THEN INSERT (id, val) VALUES (source.id, source.val)",
+        )
+        assert result["status"] == "completed", f"MERGE with comment failed: {result.get('error')}"
+
+        result = dbt_query(
+            api, self.session_id,
+            f"SELECT * FROM development.{SCHEMA}.e2e_dbt_comment_dml ORDER BY id",
+        )
+        assert len(result["rows"]) == 2
+        assert result["rows"][0] == [1, "merged"]
+        assert result["rows"][1] == [3, "new"]
+
+        # Cleanup
+        dbt_query(
+            api, self.session_id,
+            f'{DBT_COMMENT}DROP TABLE development.{SCHEMA}.e2e_dbt_comment_dml',
         )

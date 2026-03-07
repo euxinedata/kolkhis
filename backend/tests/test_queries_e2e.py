@@ -101,6 +101,82 @@ class TestResultPagination:
         assert "page_size" in results
 
 
+class TestAdvancedQueryPatterns:
+    """HAVING, UNION, subqueries — SQL patterns not yet isolated."""
+
+    def test_group_by_having(self, api):
+        """GROUP BY with HAVING filters groups correctly."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT country_of_origin, count(*) AS cnt "
+            "FROM retail_catalog.products.brands "
+            "GROUP BY country_of_origin "
+            "HAVING count(*) > 1 "
+            "ORDER BY cnt DESC LIMIT 5",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        # All returned groups should have cnt > 1
+        for row in results["rows"]:
+            assert row["cnt"] > 1, f"HAVING not applied: {row}"
+
+    def test_union(self, api):
+        """UNION deduplicates rows from two queries."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT 1 AS id, 'a' AS val "
+            "UNION "
+            "SELECT 1 AS id, 'a' AS val "
+            "UNION "
+            "SELECT 2 AS id, 'b' AS val",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert len(results["rows"]) == 2, f"UNION should deduplicate: {results['rows']}"
+
+    def test_union_all(self, api):
+        """UNION ALL keeps duplicates."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT 1 AS id UNION ALL SELECT 1 AS id UNION ALL SELECT 2 AS id",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert len(results["rows"]) == 3, f"UNION ALL should keep dupes: {results['rows']}"
+
+    def test_subquery_in_where(self, api):
+        """Subquery in WHERE clause filters correctly."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT name FROM retail_catalog.products.brands "
+            "WHERE brand_id IN (SELECT brand_id FROM retail_catalog.products.products LIMIT 3) "
+            "LIMIT 10",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert len(results["rows"]) > 0
+
+    def test_subquery_in_from(self, api):
+        """Derived table (subquery in FROM) works correctly."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT sq.cnt FROM ("
+            "  SELECT count(*) AS cnt FROM retail_catalog.products.brands"
+            ") sq",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert results["rows"][0]["cnt"] > 0
+
+    def test_correlated_subquery(self, api):
+        """Correlated subquery (EXISTS) works correctly."""
+        status, job, results = submit_and_wait(
+            api,
+            "SELECT b.name FROM retail_catalog.products.brands b "
+            "WHERE EXISTS ("
+            "  SELECT 1 FROM retail_catalog.products.products p "
+            "  WHERE p.brand_id = b.brand_id"
+            ") LIMIT 5",
+        )
+        assert status == "completed", f"Expected completed, got {job.get('error')}"
+        assert len(results["rows"]) > 0
+
+
 class TestWindowFunctions:
     """Window functions against DuckLake tables."""
 

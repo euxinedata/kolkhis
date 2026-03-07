@@ -405,6 +405,53 @@ class TestMerge:
 
 
 # ---------------------------------------------------------------------------
+# TRUNCATE TABLE
+# ---------------------------------------------------------------------------
+class TestTruncate:
+    """TRUNCATE TABLE removes all rows but keeps the table structure."""
+
+    def test_truncate_removes_all_rows(self, api, dbt_session):
+        """TRUNCATE TABLE removes all data, table remains queryable."""
+        # Create table with data
+        dbt_query(api, dbt_session, f"DROP TABLE IF EXISTS development.{SCHEMA}.e2e_merge_target")
+        result = dbt_query(
+            api, dbt_session,
+            f"CREATE TABLE development.{SCHEMA}.e2e_merge_target "
+            f"AS SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (3, 'c')) AS t(id, val)",
+        )
+        assert result["status"] == "completed"
+
+        # TRUNCATE
+        result = dbt_query(
+            api, dbt_session,
+            f"TRUNCATE TABLE development.{SCHEMA}.e2e_merge_target",
+        )
+        assert result["status"] == "completed", f"TRUNCATE failed: {result.get('error')}"
+
+        # Verify empty but queryable (cross-connection)
+        status, job, results = submit_and_wait(
+            api, f"SELECT count(*) AS cnt FROM development.{SCHEMA}.e2e_merge_target"
+        )
+        assert status == "completed", f"Query failed: {job.get('error')}"
+        assert results["rows"][0]["cnt"] == 0
+
+    def test_truncate_then_insert(self, api, dbt_session):
+        """After TRUNCATE, INSERT works and data persists."""
+        result = dbt_query(
+            api, dbt_session,
+            f"INSERT INTO development.{SCHEMA}.e2e_merge_target VALUES (10, 'fresh')",
+        )
+        assert result["status"] == "completed"
+
+        status, job, results = submit_and_wait(
+            api, f"SELECT * FROM development.{SCHEMA}.e2e_merge_target"
+        )
+        assert status == "completed"
+        assert len(results["rows"]) == 1
+        assert results["rows"][0]["id"] == 10
+
+
+# ---------------------------------------------------------------------------
 # Bare CREATE TABLE (seed pattern)
 # ---------------------------------------------------------------------------
 class TestBareCreateTable:
