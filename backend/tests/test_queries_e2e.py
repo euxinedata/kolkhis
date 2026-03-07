@@ -297,3 +297,175 @@ class TestDmlPersistenceViaEditor:
             assert ids == [1, 2, 3, 4], f"Expected [1,2,3,4], got {ids}"
         finally:
             safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_editor_multi")
+
+
+class TestAlterTableViaEditor:
+    """ALTER TABLE operations via SQL editor — schema evolution in DuckLake."""
+
+    def test_add_column(self, api):
+        """ALTER TABLE ADD COLUMN adds a column visible in catalog and queries."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"AS SELECT 1 AS id, 'hello' AS name",
+            )
+
+            status, job, _ = submit_and_wait(
+                api,
+                f"ALTER TABLE development.{SCHEMA}.e2e_alter_tbl ADD COLUMN score INTEGER",
+            )
+            assert status == "completed", f"ADD COLUMN failed: {job.get('error')}"
+
+            # Verify column in catalog
+            resp = api.get(
+                f"/api/catalog/databases/development/schemas/{SCHEMA}/objects/e2e_alter_tbl/schema"
+            )
+            resp.raise_for_status()
+            col_names = [c["name"] for c in resp.json()["columns"]]
+            assert "score" in col_names, f"New column not in catalog: {col_names}"
+
+            # Verify queryable — new column should be NULL for existing rows
+            status, job, results = submit_and_wait(
+                api, f"SELECT * FROM development.{SCHEMA}.e2e_alter_tbl"
+            )
+            assert status == "completed"
+            assert results["rows"][0]["score"] is None
+            assert results["rows"][0]["name"] == "hello"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_alter_tbl")
+
+    def test_drop_column(self, api):
+        """ALTER TABLE DROP COLUMN removes a column from catalog and queries."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"AS SELECT 1 AS id, 'hello' AS name, 42 AS val",
+            )
+
+            status, job, _ = submit_and_wait(
+                api,
+                f"ALTER TABLE development.{SCHEMA}.e2e_alter_tbl DROP COLUMN val",
+            )
+            assert status == "completed", f"DROP COLUMN failed: {job.get('error')}"
+
+            # Verify column gone from catalog
+            resp = api.get(
+                f"/api/catalog/databases/development/schemas/{SCHEMA}/objects/e2e_alter_tbl/schema"
+            )
+            resp.raise_for_status()
+            col_names = [c["name"] for c in resp.json()["columns"]]
+            assert "val" not in col_names, f"Dropped column still in catalog: {col_names}"
+            assert col_names == ["id", "name"]
+
+            # Verify data intact for remaining columns
+            status, job, results = submit_and_wait(
+                api, f"SELECT * FROM development.{SCHEMA}.e2e_alter_tbl"
+            )
+            assert status == "completed"
+            assert "val" not in results["columns"]
+            assert results["rows"][0]["id"] == 1
+            assert results["rows"][0]["name"] == "hello"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_alter_tbl")
+
+    def test_rename_column(self, api):
+        """ALTER TABLE RENAME COLUMN changes column name in catalog and queries."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"AS SELECT 1 AS id, 'hello' AS old_name",
+            )
+
+            status, job, _ = submit_and_wait(
+                api,
+                f"ALTER TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"RENAME COLUMN old_name TO new_name",
+            )
+            assert status == "completed", f"RENAME COLUMN failed: {job.get('error')}"
+
+            # Verify in catalog
+            resp = api.get(
+                f"/api/catalog/databases/development/schemas/{SCHEMA}/objects/e2e_alter_tbl/schema"
+            )
+            resp.raise_for_status()
+            col_names = [c["name"] for c in resp.json()["columns"]]
+            assert "new_name" in col_names, f"Renamed column not in catalog: {col_names}"
+            assert "old_name" not in col_names
+
+            # Verify queryable under new name
+            status, job, results = submit_and_wait(
+                api, f"SELECT new_name FROM development.{SCHEMA}.e2e_alter_tbl"
+            )
+            assert status == "completed"
+            assert results["rows"][0]["new_name"] == "hello"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_alter_tbl")
+
+    def test_alter_column_type(self, api):
+        """ALTER TABLE ALTER COLUMN TYPE changes column type."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"AS SELECT 1 AS id, 42 AS val",
+            )
+
+            status, job, _ = submit_and_wait(
+                api,
+                f"ALTER TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"ALTER COLUMN val TYPE BIGINT",
+            )
+            assert status == "completed", f"ALTER TYPE failed: {job.get('error')}"
+
+            # Verify type changed in catalog
+            resp = api.get(
+                f"/api/catalog/databases/development/schemas/{SCHEMA}/objects/e2e_alter_tbl/schema"
+            )
+            resp.raise_for_status()
+            cols = {c["name"]: c["type"] for c in resp.json()["columns"]}
+            assert cols["val"] == "int64", f"Type not changed: {cols}"
+
+            # Verify data intact
+            status, job, results = submit_and_wait(
+                api, f"SELECT val FROM development.{SCHEMA}.e2e_alter_tbl"
+            )
+            assert status == "completed"
+            assert results["rows"][0]["val"] == 42
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_alter_tbl")
+
+    def test_add_column_then_insert(self, api):
+        """ADD COLUMN followed by INSERT with new column works end-to-end."""
+        try:
+            submit_and_wait(
+                api,
+                f"CREATE TABLE development.{SCHEMA}.e2e_alter_tbl "
+                f"AS SELECT 1 AS id",
+            )
+
+            submit_and_wait(
+                api,
+                f"ALTER TABLE development.{SCHEMA}.e2e_alter_tbl ADD COLUMN tag VARCHAR",
+            )
+
+            status, job, _ = submit_and_wait(
+                api,
+                f"INSERT INTO development.{SCHEMA}.e2e_alter_tbl VALUES (2, 'new_row')",
+            )
+            assert status == "completed", f"INSERT failed: {job.get('error')}"
+
+            status, job, results = submit_and_wait(
+                api,
+                f"SELECT * FROM development.{SCHEMA}.e2e_alter_tbl ORDER BY id",
+            )
+            assert status == "completed"
+            assert len(results["rows"]) == 2
+            # Row 1: tag should be NULL (existed before ADD COLUMN)
+            assert results["rows"][0]["tag"] is None
+            # Row 2: tag should be 'new_row'
+            assert results["rows"][1]["tag"] == "new_row"
+        finally:
+            safe_cleanup(api, f"DROP TABLE development.{SCHEMA}.e2e_alter_tbl")
