@@ -113,10 +113,14 @@ services:
 
   dagster-code:
     build: ./docker/dagster
-    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "3030"]
     environment:
       - DAGSTER_PG_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/dagster
       - DAGSTER_HOME=/opt/dagster
+      - GITEA_SHELL_URL=${GITEA_SHELL_URL:-http://gitea:3000}
+      - GITEA_ADMIN_USER=${GITEA_ADMIN_USER:-kolkhis-admin}
+      - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026}
+    ports:
+      - "3031:3031"
     volumes:
       - ./docker/dagster/dagster-local.yaml:/opt/dagster/dagster.yaml
     depends_on:
