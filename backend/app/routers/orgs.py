@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE
+import httpx
+
+from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, DAGSTER_CODE_URL
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import OrgDatabase, Organization, OrgMembership, User
@@ -116,6 +118,15 @@ jobs:
           apt-get update -qq && apt-get install -y -qq python3 python3-pip > /dev/null 2>&1
           pip install -q --break-system-packages sqlfluff
       - run: sqlfluff lint models/ --dialect duckdb
+  deploy:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - run: |
+          REPO_OWNER=$(echo $GITHUB_REPOSITORY | cut -d/ -f1)
+          curl -sf -X POST http://dagster-code:3031/reload \\
+            -H 'Content-Type: application/json' \\
+            -d "{\\"org_id\\": \\"$REPO_OWNER\\", \\"repo\\": \\"warehouse\\"}"
 """,
 }
 
@@ -187,6 +198,15 @@ async def create_org(
             owner=org.id,
         )
         await _create_org_storage(org.id, db)
+        # Prime dagster-code with the new org's repo
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"{DAGSTER_CODE_URL}/reload",
+                    json={"org_id": org.id, "repo": WAREHOUSE_REPO},
+                )
+        except Exception:
+            logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)
     except Exception as exc:
         logger.error("Org provisioning failed for %s: %s", org.id, exc)
         raise HTTPException(status_code=502, detail="Failed to provision organization")
