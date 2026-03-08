@@ -365,6 +365,7 @@ export function ProjectEditor() {
 
   // Sidebar mode: files or databases
   const [sidebarMode, setSidebarMode] = useState<'files' | 'databases'>('files')
+  const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
 
   // Persist session to localStorage (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -970,6 +971,18 @@ export function ProjectEditor() {
                  onClick={() => setSidebarMode('files')}>Files</div>
             <div className={`sidebar-tab ${sidebarMode === 'databases' ? 'active' : ''}`}
                  onClick={() => setSidebarMode('databases')}>Databases</div>
+            <button
+              className="sidebar-refresh-btn"
+              title={sidebarMode === 'files' ? 'Refresh file tree' : 'Refresh databases'}
+              onClick={() => {
+                if (sidebarMode === 'files') {
+                  dataProviderRef.current?.loadDirectory('', true)
+                  setTreeKey(k => k + 1)
+                } else {
+                  setCatalogRefreshKey(k => k + 1)
+                }
+              }}
+            >&#x21bb;</button>
           </div>
           {sidebarMode === 'files' ? (
             <div
@@ -1016,7 +1029,7 @@ export function ProjectEditor() {
             </div>
           ) : (
             <div className="file-tree-list">
-              <CatalogPanel onSelectObject={handleCatalogSelect} />
+              <CatalogPanel refreshKey={catalogRefreshKey} onSelectObject={handleCatalogSelect} />
             </div>
           )}
         </div>
