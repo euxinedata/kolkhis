@@ -8,6 +8,17 @@ import duckdb
 
 logger = logging.getLogger(__name__)
 
+_MEM_FRACTION = 0.75
+
+
+def _set_memory_limit(conn: duckdb.DuckDBPyConnection) -> None:
+    """Set DuckDB memory_limit to 75% of system RAM."""
+    total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    limit_gb = int(total * _MEM_FRACTION) // (1024 ** 3)
+    if limit_gb > 0:
+        conn.execute(f"SET memory_limit='{limit_gb}GB'")
+        logger.info("DuckDB memory_limit set to %dGB", limit_gb)
+
 
 # Module-level dict for cancellation support: job_id -> duckdb.DuckDBPyConnection
 _running_conns: dict[str, duckdb.DuckDBPyConnection] = {}
@@ -115,6 +126,7 @@ def execute_query(
     conn.execute(f"SET temp_directory='{temp_dir}'")
     if os.path.isdir("/opt/kolkhis-worker"):
         conn.execute("SET home_directory='/opt/kolkhis-worker'")
+    _set_memory_limit(conn)
     _running_conns[job_id] = conn
 
     try:

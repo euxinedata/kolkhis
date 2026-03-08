@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import duckdb
 import pyarrow.ipc as ipc
 
-from executor import setup_ducklake_catalog
+from executor import setup_ducklake_catalog, _set_memory_limit
 
 
 @dataclass
@@ -35,6 +35,7 @@ class SessionManager:
         conn.execute(f"SET temp_directory='{temp_dir}'")
         if os.path.isdir("/opt/kolkhis-worker"):
             conn.execute("SET home_directory='/opt/kolkhis-worker'")
+        _set_memory_limit(conn)
         return conn, temp_dir
 
     def _register_session(self, session_id: str, conn: duckdb.DuckDBPyConnection, temp_dir: str) -> str:
