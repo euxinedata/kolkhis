@@ -92,13 +92,6 @@ def _start_grpc(repo_dir: Path) -> bool:
     dagster_dir = repo_dir / "dagster"
     log.info("Starting gRPC server from %s", dagster_dir)
 
-    env = os.environ.copy()
-    if _current_auth_token:
-        env["KOLKHIS_AUTH_TOKEN"] = _current_auth_token
-    if _current_backend_url:
-        env["KOLKHIS_BACKEND_URL"] = _current_backend_url
-    env["DBT_USER"] = "dagster"
-
     _grpc_proc = subprocess.Popen(
         [
             "dagster", "api", "grpc",
@@ -107,7 +100,6 @@ def _start_grpc(repo_dir: Path) -> bool:
             "-f", str(definitions_file),
         ],
         cwd=str(dagster_dir),
-        env=env,
     )
     log.info("gRPC server started (pid %d)", _grpc_proc.pid)
     return True
@@ -121,6 +113,12 @@ def _do_reload(org_id: str, repo: str, auth_token: str | None = None, backend_ur
         _current_commit = _get_commit(repo_dir)
         _current_auth_token = auth_token
         _current_backend_url = backend_url
+        # Set env vars on the process so Dagster's multiprocess executor inherits them
+        if auth_token:
+            os.environ["KOLKHIS_AUTH_TOKEN"] = auth_token
+        if backend_url:
+            os.environ["KOLKHIS_BACKEND_URL"] = backend_url
+        os.environ["DBT_USER"] = "dagster"
         loaded = _start_grpc(repo_dir)
         return {
             "loaded": loaded,
