@@ -104,6 +104,17 @@ dbt_packages/
     "seeds/.gitkeep": "",
     "tests/.gitkeep": "",
     "dagster/.gitkeep": "",
+    ".gitea/workflows/ci.yml": """\
+name: CI
+on: [push]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install sqlfluff
+      - run: sqlfluff lint models/ --dialect duckdb
+""",
 }
 
 
