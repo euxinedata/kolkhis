@@ -544,6 +544,7 @@ export function QueryEditor() {
           <aside className="catalog-sidebar" style={{ width: catalogWidth, minWidth: catalogWidth }}>
             <div className="catalog-sidebar-header">
               <span className="catalog-sidebar-title">Catalog</span>
+              <button className="sidebar-refresh-btn" onClick={() => setCatalogRefreshKey(k => k + 1)} title="Refresh catalog">↻</button>
               <button className="catalog-toggle" onClick={() => setCatalogOpen(false)} title="Hide catalog">✕</button>
             </div>
             <CatalogPanel refreshKey={catalogRefreshKey} onSelectObject={handleSelectObject} />

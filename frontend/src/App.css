@@ -217,17 +217,32 @@
 .catalog-sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 4px 9px;
   border-bottom: 1px solid #1e1e1e;
 }
 
 .catalog-sidebar-title {
+  flex: 1;
   font-size: 12px;
   font-weight: 600;
   color: #909090;
   text-transform: uppercase;
   letter-spacing: 0.6px;
+}
+
+.catalog-sidebar-header .sidebar-refresh-btn {
+  background: none;
+  border: none;
+  color: #606060;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.catalog-sidebar-header .sidebar-refresh-btn:hover {
+  color: #d4850a;
 }
 
 .catalog-toggle {

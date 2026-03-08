@@ -91,6 +91,21 @@
   border-bottom: 2px solid #d4850a;
 }
 
+.sidebar-refresh-btn {
+  background: none;
+  border: none;
+  color: #606060;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sidebar-refresh-btn:hover {
+  color: #d4850a;
+}
+
 .file-tree-title {
   font-size: 12px;
   font-weight: 600;
