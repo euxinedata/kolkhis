@@ -50,7 +50,7 @@ class QueryJob(Base):
     __tablename__ = "query_jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sql: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     error: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
