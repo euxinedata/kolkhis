@@ -21,7 +21,7 @@ async def ci_status(
 
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            _api(f"/repos/{org_id}/{WAREHOUSE_REPO}/actions/runs"),
+            _api(f"/repos/{org_id}/{WAREHOUSE_REPO}/actions/tasks"),
             headers=_headers(),
             params={"limit": 5},
         )
