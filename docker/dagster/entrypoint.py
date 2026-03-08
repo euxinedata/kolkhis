@@ -24,6 +24,7 @@ REPOS_DIR = Path("/opt/dagster/repos")
 GITEA_URL = os.environ.get("GITEA_SHELL_URL", "http://gitea:3000")
 GITEA_USER = os.environ.get("GITEA_ADMIN_USER", "")
 GITEA_PASS = os.environ.get("GITEA_ADMIN_PASSWORD", "")
+RELOAD_TOKEN = os.environ.get("DAGSTER_RELOAD_TOKEN", "")
 
 # State
 _lock = threading.Lock()
@@ -128,8 +129,20 @@ def _get_status() -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _check_auth(self) -> bool:
+        """Validate Bearer token if DAGSTER_RELOAD_TOKEN is set."""
+        if not RELOAD_TOKEN:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth == f"Bearer {RELOAD_TOKEN}":
+            return True
+        self._json(401, {"error": "unauthorized"})
+        return False
+
     def do_POST(self):
         if self.path == "/reload":
+            if not self._check_auth():
+                return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length)) if length else {}
@@ -140,12 +153,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 result = _do_reload(org_id, repo)
                 self._json(200, result)
-            except subprocess.CalledProcessError as e:
-                log.error("Git operation failed: %s", e.stderr)
-                self._json(500, {"error": "git operation failed", "detail": str(e.stderr)})
-            except Exception as e:
+            except subprocess.CalledProcessError:
+                log.exception("Git operation failed")
+                self._json(500, {"error": "git operation failed"})
+            except Exception:
                 log.exception("Reload failed")
-                self._json(500, {"error": str(e)})
+                self._json(500, {"error": "reload failed"})
         else:
             self._json(404, {"error": "not found"})
 

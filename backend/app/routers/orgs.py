@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import httpx
 import s3fs
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -8,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
-import httpx
-
-from app.config import S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME, SHELL_MODE, DAGSTER_CODE_URL
+from app.config import (
+    S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME,
+    SHELL_MODE, DAGSTER_CODE_URL, DAGSTER_RELOAD_TOKEN,
+)
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
 from app.models import OrgDatabase, Organization, OrgMembership, User
@@ -126,6 +128,7 @@ jobs:
           REPO_OWNER=$(echo $GITHUB_REPOSITORY | cut -d/ -f1)
           curl -sf -X POST http://dagster-code:3031/reload \\
             -H 'Content-Type: application/json' \\
+            -H 'Authorization: Bearer dagster-reload-dev' \\
             -d "{\\"org_id\\": \\"$REPO_OWNER\\", \\"repo\\": \\"warehouse\\"}"
 """,
 }
@@ -200,10 +203,14 @@ async def create_org(
         await _create_org_storage(org.id, db)
         # Prime dagster-code with the new org's repo
         try:
+            headers = {}
+            if DAGSTER_RELOAD_TOKEN:
+                headers["Authorization"] = f"Bearer {DAGSTER_RELOAD_TOKEN}"
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(
                     f"{DAGSTER_CODE_URL}/reload",
                     json={"org_id": org.id, "repo": WAREHOUSE_REPO},
+                    headers=headers,
                 )
         except Exception:
             logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)

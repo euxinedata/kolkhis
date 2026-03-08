@@ -119,6 +119,7 @@ services:
       - GITEA_SHELL_URL=${GITEA_SHELL_URL:-http://gitea:3000}
       - GITEA_ADMIN_USER=${GITEA_ADMIN_USER:-kolkhis-admin}
       - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026}
+      - DAGSTER_RELOAD_TOKEN=${DAGSTER_RELOAD_TOKEN:-dagster-reload-dev}
     ports:
       - "3031:3031"
     volumes:

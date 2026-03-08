@@ -84,6 +84,7 @@ HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
 # Dagster code deployment
 DAGSTER_CODE_URL = os.environ.get("DAGSTER_CODE_URL", "http://dagster-code:3031")
+DAGSTER_RELOAD_TOKEN = os.environ.get("DAGSTER_RELOAD_TOKEN", "")
 
 # Shell pod configuration
 SHELL_MODE = os.environ.get("SHELL_MODE", "local")  # "local" or "k8s"
