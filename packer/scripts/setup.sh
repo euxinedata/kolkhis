@@ -23,7 +23,6 @@ chown kolkhis-worker:kolkhis-worker /etc/kolkhis-worker
 
 # Install worker dependencies
 cd /opt/kolkhis-worker
-rm -rf .venv __pycache__
 uv venv --python python3.12
 uv pip install --python .venv/bin/python \
   'fastapi>=0.115' \

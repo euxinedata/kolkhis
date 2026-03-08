@@ -59,10 +59,34 @@ build {
     ]
   }
 
-  # Upload worker service source
   provisioner "file" {
-    source      = "../worker/"
-    destination = "/opt/kolkhis-worker"
+    source      = "../worker/app.py"
+    destination = "/opt/kolkhis-worker/app.py"
+  }
+
+  provisioner "file" {
+    source      = "../worker/config.py"
+    destination = "/opt/kolkhis-worker/config.py"
+  }
+
+  provisioner "file" {
+    source      = "../worker/executor.py"
+    destination = "/opt/kolkhis-worker/executor.py"
+  }
+
+  provisioner "file" {
+    source      = "../worker/sessions.py"
+    destination = "/opt/kolkhis-worker/sessions.py"
+  }
+
+  provisioner "file" {
+    source      = "../worker/pyproject.toml"
+    destination = "/opt/kolkhis-worker/pyproject.toml"
+  }
+
+  provisioner "file" {
+    source      = "../worker/uv.lock"
+    destination = "/opt/kolkhis-worker/uv.lock"
   }
 
   # Upload systemd service file
