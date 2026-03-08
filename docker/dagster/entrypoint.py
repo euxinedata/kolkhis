@@ -31,6 +31,8 @@ _lock = threading.Lock()
 _grpc_proc: subprocess.Popen | None = None
 _current_org: str | None = None
 _current_commit: str | None = None
+_current_auth_token: str | None = None
+_current_backend_url: str | None = None
 
 
 def _git_clone_or_pull(org_id: str, repo: str) -> Path:
@@ -89,6 +91,14 @@ def _start_grpc(repo_dir: Path) -> bool:
     _stop_grpc()
     dagster_dir = repo_dir / "dagster"
     log.info("Starting gRPC server from %s", dagster_dir)
+
+    env = os.environ.copy()
+    if _current_auth_token:
+        env["KOLKHIS_AUTH_TOKEN"] = _current_auth_token
+    if _current_backend_url:
+        env["KOLKHIS_BACKEND_URL"] = _current_backend_url
+    env["DBT_USER"] = "dagster"
+
     _grpc_proc = subprocess.Popen(
         [
             "dagster", "api", "grpc",
@@ -97,17 +107,20 @@ def _start_grpc(repo_dir: Path) -> bool:
             "-f", str(definitions_file),
         ],
         cwd=str(dagster_dir),
+        env=env,
     )
     log.info("gRPC server started (pid %d)", _grpc_proc.pid)
     return True
 
 
-def _do_reload(org_id: str, repo: str) -> dict:
-    global _current_org, _current_commit
+def _do_reload(org_id: str, repo: str, auth_token: str | None = None, backend_url: str | None = None) -> dict:
+    global _current_org, _current_commit, _current_auth_token, _current_backend_url
     with _lock:
         repo_dir = _git_clone_or_pull(org_id, repo)
         _current_org = org_id
         _current_commit = _get_commit(repo_dir)
+        _current_auth_token = auth_token
+        _current_backend_url = backend_url
         loaded = _start_grpc(repo_dir)
         return {
             "loaded": loaded,
@@ -151,7 +164,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not org_id:
                     self._json(400, {"error": "org_id required"})
                     return
-                result = _do_reload(org_id, repo)
+                result = _do_reload(
+                    org_id, repo,
+                    auth_token=body.get("auth_token"),
+                    backend_url=body.get("backend_url"),
+                )
                 self._json(200, result)
             except subprocess.CalledProcessError:
                 log.exception("Git operation failed")
