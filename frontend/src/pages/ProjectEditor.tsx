@@ -367,13 +367,13 @@ export function ProjectEditor() {
   const [sidebarMode, setSidebarMode] = useState<'files' | 'databases'>('files')
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
   const [ciStatus, setCiStatus] = useState<{
-    status?: string; conclusion?: string; head_sha?: string
+    status?: string; head_sha?: string
   } | null>(null)
 
   useEffect(() => {
     const fetchCi = async () => {
       try {
-        const data = await apiFetch<{ runs: Array<{ status?: string; conclusion?: string; head_sha?: string }> }>('/api/ci/status')
+        const data = await apiFetch<{ runs: Array<{ status?: string; head_sha?: string }> }>('/api/ci/status')
         if (data.runs?.length > 0) setCiStatus(data.runs[0])
         else setCiStatus(null)
       } catch { setCiStatus(null) }
@@ -1001,11 +1001,11 @@ export function ProjectEditor() {
             >&#x21bb;</button>
             {ciStatus && (
               <span
-                className={`ci-status-badge ci-status-${ciStatus.conclusion || ciStatus.status}`}
-                title={`CI: ${ciStatus.conclusion || ciStatus.status} (${ciStatus.head_sha})`}
+                className={`ci-status-badge ci-status-${ciStatus.status}`}
+                title={`CI: ${ciStatus.status} (${ciStatus.head_sha})`}
               >
-                {ciStatus.conclusion === 'success' ? '✓' :
-                 ciStatus.conclusion === 'failure' ? '✗' :
+                {ciStatus.status === 'success' ? '✓' :
+                 ciStatus.status === 'failure' ? '✗' :
                  ciStatus.status === 'running' ? '◌' : '?'}
               </span>
             )}

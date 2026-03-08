@@ -39,7 +39,6 @@ async def ci_status(
             {
                 "id": r["id"],
                 "status": r["status"],
-                "conclusion": r.get("conclusion"),
                 "head_sha": r.get("head_sha", "")[:8],
                 "display_title": r.get("display_title", ""),
                 "event": r.get("event", ""),

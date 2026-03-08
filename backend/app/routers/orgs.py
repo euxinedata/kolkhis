@@ -112,7 +112,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install sqlfluff
+      - run: |
+          apt-get update -qq && apt-get install -y -qq python3 python3-pip > /dev/null 2>&1
+          pip install -q --break-system-packages sqlfluff
       - run: sqlfluff lint models/ --dialect duckdb
 """,
 }

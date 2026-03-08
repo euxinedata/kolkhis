@@ -1,0 +1,7 @@
+runner:
+  labels:
+    - "ubuntu-latest:docker://node:20-bookworm"
+
+container:
+  network: "kolkhis_default"
+  force_pull: false
