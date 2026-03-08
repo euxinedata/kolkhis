@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dbt")
 
 # Track active dbt sessions: user_id -> {session_id, worker_url}
-_active_sessions: dict[int, dict] = {}
+_active_sessions: dict[str, dict] = {}
 
 
 def _worker_headers() -> dict:
@@ -67,7 +67,7 @@ async def create_session(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = int(user["sub"])
+    user_id = user["sub"]  # str — numeric for users, "service:dagster" for service tokens
 
     # Reuse existing session if still alive
     existing = _active_sessions.get(user_id)
@@ -99,7 +99,7 @@ async def create_session(
         for d in org_databases
     ]
 
-    worker_url = await _get_worker_url(user_id)
+    worker_url = await _get_worker_url(int(user_id)) if user_id.isdigit() else WORKER_URL
 
     payload = {
         "pg_connection_string": DUCKLAKE_WORKER_PG_CONNECTION,
@@ -176,7 +176,7 @@ async def session_query(
     user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = int(user["sub"])
+    user_id = user["sub"]
     existing = _active_sessions.get(user_id)
     if not existing or existing["session_id"] != session_id:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -186,15 +186,17 @@ async def session_query(
     # Record query in history
     job_id = str(uuid.uuid4())
     now = datetime.utcnow()
+    numeric_user_id = int(user_id) if user_id.isdigit() else None
     job = QueryJob(
-        id=job_id, user_id=user_id, sql=body.sql,
+        id=job_id, user_id=numeric_user_id, sql=body.sql,
         status="running", started_at=now,
     )
     db.add(job)
     await db.commit()
 
     # Update worker VM timeout
-    await _touch_worker_vm(user_id)
+    if user_id.isdigit():
+        await _touch_worker_vm(int(user_id))
 
     try:
         # Strip dbt's leading /* ... */ comment for pattern matching
@@ -252,7 +254,7 @@ async def close_session(
     session_id: str,
     user: dict = Depends(require_auth),
 ):
-    user_id = int(user["sub"])
+    user_id = user["sub"]
     existing = _active_sessions.pop(user_id, None)
     worker_url = existing["worker_url"] if existing else WORKER_URL
 
