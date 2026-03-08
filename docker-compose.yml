@@ -120,6 +120,7 @@ services:
       - GITEA_ADMIN_USER=${GITEA_ADMIN_USER:-kolkhis-admin}
       - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026}
       - DAGSTER_RELOAD_TOKEN=${DAGSTER_RELOAD_TOKEN:-dagster-reload-dev}
+      - SHELL_BACKEND_URL=${SHELL_BACKEND_URL:-http://host.docker.internal:8000}
     ports:
       - "3031:3031"
     volumes:

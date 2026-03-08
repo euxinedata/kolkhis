@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_auth
+from app.auth import make_service_token, require_auth
 from app.config import (
     S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME,
-    SHELL_MODE, DAGSTER_CODE_URL, DAGSTER_RELOAD_TOKEN,
+    SHELL_MODE, DAGSTER_CODE_URL, DAGSTER_RELOAD_TOKEN, SHELL_BACKEND_URL,
 )
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
@@ -209,7 +209,12 @@ async def create_org(
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(
                     f"{DAGSTER_CODE_URL}/reload",
-                    json={"org_id": org.id, "repo": WAREHOUSE_REPO},
+                    json={
+                        "org_id": org.id,
+                        "repo": WAREHOUSE_REPO,
+                        "auth_token": make_service_token(org.id),
+                        "backend_url": SHELL_BACKEND_URL,
+                    },
                     headers=headers,
                 )
         except Exception:

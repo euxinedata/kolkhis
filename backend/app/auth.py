@@ -44,6 +44,15 @@ def _make_token(user: User, org_id: str | None = None, org_role: str | None = No
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
+def make_service_token(org_id: str) -> str:
+    """Mint a long-lived service JWT for dagster (no expiry)."""
+    return jwt.encode(
+        {"sub": "service:dagster", "org_id": org_id, "name": "dagster", "email": "dagster@kolkhis.internal"},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+
+
 @router.get("/login/google")
 async def login_google(request: Request):
     redirect_uri = request.url_for("callback_google")

@@ -26,6 +26,12 @@ from app.query_engine import _result_path, cancel_query, submit_query
 router = APIRouter(prefix="/api/queries")
 
 
+def _user_id(user: dict) -> int | None:
+    """Extract numeric user_id from auth payload; None for service tokens."""
+    sub = user["sub"]
+    return int(sub) if sub.isdigit() else None
+
+
 def _read_result_table(job_id: str):
     """Read a result Parquet table from local filesystem or S3."""
     import pyarrow.parquet as pq
@@ -73,7 +79,7 @@ async def create_query(
             if ddl["op"].startswith("show_"):
                 row_count = await execute_show(ddl, org_id, job_id, db)
                 job = QueryJob(
-                    id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                    id=job_id, user_id=_user_id(user), sql=body.sql,
                     status="completed", row_count=row_count,
                     started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
                 )
@@ -83,7 +89,7 @@ async def create_query(
             else:
                 message = await execute_ddl(ddl, org_id, db)
                 job = QueryJob(
-                    id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                    id=job_id, user_id=_user_id(user), sql=body.sql,
                     status="completed", row_count=0,
                     started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
                 )
@@ -92,7 +98,7 @@ async def create_query(
                 return {"job_id": job_id, "ddl_message": message}
         except ValueError as e:
             job = QueryJob(
-                id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                id=job_id, user_id=_user_id(user), sql=body.sql,
                 status="failed", error=str(e),
                 started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
             )
@@ -103,7 +109,7 @@ async def create_query(
             import logging
             logging.getLogger(__name__).exception("DDL execution failed for: %s", body.sql)
             job = QueryJob(
-                id=job_id, user_id=int(user["sub"]), sql=body.sql,
+                id=job_id, user_id=_user_id(user), sql=body.sql,
                 status="failed", error=str(e),
                 started_at=datetime.utcnow(), completed_at=datetime.utcnow(),
             )
@@ -112,10 +118,10 @@ async def create_query(
             raise HTTPException(status_code=500, detail=f"DDL execution failed: {e}")
 
     job_id = str(uuid.uuid4())
-    job = QueryJob(id=job_id, user_id=int(user["sub"]), sql=body.sql, status="pending")
+    job = QueryJob(id=job_id, user_id=_user_id(user), sql=body.sql, status="pending")
     db.add(job)
     await db.commit()
-    submit_query(job_id, body.sql, user_id=int(user["sub"]), org_id=org_id)
+    submit_query(job_id, body.sql, user_id=_user_id(user) or 0, org_id=org_id)
     return {"job_id": job_id}
 
 
@@ -126,7 +132,7 @@ async def list_queries(
 ):
     result = await db.execute(
         select(QueryJob)
-        .where(QueryJob.user_id == int(user["sub"]))
+        .where(QueryJob.user_id == _user_id(user))
         .order_by(QueryJob.created_at.desc())
     )
     jobs = result.scalars().all()
@@ -153,7 +159,7 @@ async def get_query(
 ):
     result = await db.execute(
         select(QueryJob).where(
-            QueryJob.id == job_id, QueryJob.user_id == int(user["sub"])
+            QueryJob.id == job_id, QueryJob.user_id == _user_id(user)
         )
     )
     job = result.scalar_one_or_none()
@@ -179,7 +185,7 @@ async def cancel_query_endpoint(
 ):
     result = await db.execute(
         select(QueryJob).where(
-            QueryJob.id == job_id, QueryJob.user_id == int(user["sub"])
+            QueryJob.id == job_id, QueryJob.user_id == _user_id(user)
         )
     )
     job = result.scalar_one_or_none()
@@ -209,7 +215,7 @@ async def get_results(
 ):
     result = await db.execute(
         select(QueryJob).where(
-            QueryJob.id == job_id, QueryJob.user_id == int(user["sub"])
+            QueryJob.id == job_id, QueryJob.user_id == _user_id(user)
         )
     )
     job = result.scalar_one_or_none()
@@ -248,7 +254,7 @@ async def export_csv(
 ):
     result = await db.execute(
         select(QueryJob).where(
-            QueryJob.id == job_id, QueryJob.user_id == int(user["sub"])
+            QueryJob.id == job_id, QueryJob.user_id == _user_id(user)
         )
     )
     job = result.scalar_one_or_none()
