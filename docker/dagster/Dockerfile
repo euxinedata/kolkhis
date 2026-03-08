@@ -8,7 +8,8 @@ RUN pip install --no-cache-dir \
     dagster-postgres \
     dagster-k8s \
     dagster-dbt \
-    dbt-core
+    dbt-core \
+    "dbt-kolkhis @ git+https://github.com/euxinedata/dbt-kolkhis.git@v1.0.0"
 
 COPY dagster.yaml workspace.yaml /opt/dagster/
 COPY entrypoint.py /opt/dagster/entrypoint.py
