@@ -45,7 +45,7 @@ services:
     restart: "no"
 
   gitea:
-    image: gitea/gitea:1.23-rootless
+    image: gitea/gitea:1.24-rootless
     environment:
       - GITEA__database__DB_TYPE=postgres
       - GITEA__database__HOST=db:5432
@@ -56,6 +56,8 @@ services:
       - GITEA__server__DISABLE_SSH=true
       - GITEA__server__ROOT_URL=http://localhost:3000
       - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__actions__ENABLED=true
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_TOKEN}
     ports:
       - "3000:3000"
     depends_on:
@@ -76,6 +78,19 @@ services:
       gitea admin user list --admin 2>/dev/null | grep -q kolkhis-admin && exit 0;
       gitea admin user create --username ${GITEA_ADMIN_USER:-kolkhis-admin} --password ${GITEA_ADMIN_PASSWORD:-kolkhis-dev-2026} --email ${GITEA_ADMIN_EMAIL:-admin@kolkhis.local} --admin"
     restart: "no"
+
+  gitea-runner:
+    image: gitea/act_runner:latest
+    environment:
+      - GITEA_INSTANCE_URL=http://gitea:3000
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_TOKEN}
+      - GITEA_RUNNER_NAME=local-runner
+      - CONFIG_FILE=/config.yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/gitea-runner/config.yaml:/config.yaml
+    depends_on:
+      - gitea
 
   shell:
     build: ./shell

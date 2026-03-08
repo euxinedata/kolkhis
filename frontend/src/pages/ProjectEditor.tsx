@@ -366,6 +366,22 @@ export function ProjectEditor() {
   // Sidebar mode: files or databases
   const [sidebarMode, setSidebarMode] = useState<'files' | 'databases'>('files')
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
+  const [ciStatus, setCiStatus] = useState<{
+    status?: string; head_sha?: string
+  } | null>(null)
+
+  useEffect(() => {
+    const fetchCi = async () => {
+      try {
+        const data = await apiFetch<{ runs: Array<{ status?: string; head_sha?: string }> }>('/api/ci/status')
+        if (data.runs?.length > 0) setCiStatus(data.runs[0])
+        else setCiStatus(null)
+      } catch { setCiStatus(null) }
+    }
+    fetchCi()
+    const interval = setInterval(fetchCi, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Persist session to localStorage (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -983,6 +999,16 @@ export function ProjectEditor() {
                 }
               }}
             >&#x21bb;</button>
+            {ciStatus && (
+              <span
+                className={`ci-status-badge ci-status-${ciStatus.status}`}
+                title={`CI: ${ciStatus.status} (${ciStatus.head_sha})`}
+              >
+                {ciStatus.status === 'success' ? '✓' :
+                 ciStatus.status === 'failure' ? '✗' :
+                 ciStatus.status === 'running' ? '◌' : '?'}
+              </span>
+            )}
           </div>
           {sidebarMode === 'files' ? (
             <div
