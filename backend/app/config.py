@@ -82,6 +82,9 @@ GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
 GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
+# Dagster code deployment
+DAGSTER_CODE_URL = os.environ.get("DAGSTER_CODE_URL", "http://dagster-code:3031")
+
 # Shell pod configuration
 SHELL_MODE = os.environ.get("SHELL_MODE", "local")  # "local" or "k8s"
 SHELL_NAMESPACE = os.environ.get("SHELL_NAMESPACE", "kolkhis")
