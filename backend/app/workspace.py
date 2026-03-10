@@ -187,11 +187,19 @@ async def git_status(org_id: str, shell_username: str, repo_name: str) -> dict[s
             continue
         code = line[:2]
         filepath = line[3:]
-        if code in ("??", "A ", " A"):
-            result[filepath] = "new"
-        elif code in ("M ", " M", "MM"):
+        x, y = code[0], code[1]  # X=staging, Y=working tree
+        if code == "??":
+            result[filepath] = "untracked"
+        elif y == " " and x in ("A", "M", "R"):
+            # Fully staged (added, modified, or renamed) — nothing unstaged
+            result[filepath] = "added"
+        elif x == " " and y in ("M", "D"):
+            # Unstaged changes only
+            result[filepath] = "modified" if y == "M" else "deleted"
+        elif x in ("A", "M", "R") and y in ("M", "D"):
+            # Staged + additional unstaged changes
             result[filepath] = "modified"
-        elif code in ("D ", " D"):
+        elif x == "D" or y == "D":
             result[filepath] = "deleted"
         else:
             result[filepath] = "modified"

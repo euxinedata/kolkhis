@@ -352,8 +352,8 @@ export function ProjectEditor() {
   const [renamingTerminalId, setRenamingTerminalId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
-  // VCS status state (used once we add custom styling back)
-  const [, setVcsStatus] = useState<Record<string, string>>({})
+  // VCS status: maps repo-relative path → "new" | "modified" | "deleted"
+  const [vcsStatus, setVcsStatus] = useState<Record<string, string>>({})
 
   // Tree data provider + ref
   const dataProviderRef = useRef<FileTreeDataProvider | null>(null)
@@ -994,6 +994,7 @@ export function ProjectEditor() {
                 if (sidebarMode === 'files') {
                   dataProviderRef.current?.loadDirectory('', true)
                   setTreeKey(k => k + 1)
+                  loadStatus()
                 } else {
                   setCatalogRefreshKey(k => k + 1)
                 }
@@ -1037,8 +1038,10 @@ export function ProjectEditor() {
                   const iconUrl = item.isFolder
                     ? folderIconUrl(context.isExpanded ?? false)
                     : fileIconUrl(item.data?.name ?? '')
+                  const status = item.data?.path ? vcsStatus[item.data.path] : undefined
+                  const vcsClass = status ? `vcs-${status}` : ''
                   return (
-                    <span className="file-tree-title-with-icon">
+                    <span className={`file-tree-title-with-icon ${vcsClass}`}>
                       <img className="file-tree-icon" src={iconUrl} alt="" />
                       {title}
                     </span>
