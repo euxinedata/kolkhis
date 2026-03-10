@@ -127,7 +127,7 @@ jobs:
     steps:
       - run: |
           REPO_OWNER=$(echo $GITHUB_REPOSITORY | cut -d/ -f1)
-          curl -sf -X POST http://dagster-code:3031/reload \\
+          curl -sf -X POST http://{dagster_service}:3031/reload \\
             -H 'Content-Type: application/json' \\
             -H 'Authorization: Bearer dagster-reload-dev' \\
             -d "{\\"org_id\\": \\"$REPO_OWNER\\", \\"repo\\": \\"warehouse\\"}"
@@ -202,8 +202,9 @@ async def create_org(
     try:
         await create_gitea_org(org.id)
         await create_repo(WAREHOUSE_REPO, owner=org.id)
+        dagster_service = f"dagster-code-{org.id}" if DAGSTER_MODE == "k8s" else "dagster-code"
         scaffold = {
-            path: content.replace("{name}", body.name)
+            path: content.replace("{name}", body.name).replace("{dagster_service}", dagster_service)
             for path, content in _WAREHOUSE_SCAFFOLD.items()
         }
         await create_files_batch(
