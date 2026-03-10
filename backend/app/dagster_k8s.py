@@ -127,53 +127,67 @@ def _create_service(org_id: str, names: dict) -> None:
     _core_v1.create_namespaced_service(namespace=DAGSTER_NAMESPACE, body=service)
 
 
-def _update_workspace_configmap(org_id: str, names: dict) -> None:
-    try:
-        cm = _core_v1.read_namespaced_config_map(
-            name=WORKSPACE_CONFIGMAP, namespace=DAGSTER_NAMESPACE,
-        )
-    except client.ApiException as e:
-        if e.status == 404:
-            cm = client.V1ConfigMap(
-                api_version="v1",
-                kind="ConfigMap",
-                metadata=client.V1ObjectMeta(
-                    name=WORKSPACE_CONFIGMAP,
-                    namespace=DAGSTER_NAMESPACE,
-                    labels={"managed-by": "kolkhis"},
-                ),
-                data={"workspace.yaml": "load_from: []\n"},
-            )
-            _core_v1.create_namespaced_config_map(namespace=DAGSTER_NAMESPACE, body=cm)
-        else:
-            raise
+def _update_workspace_configmap(org_id: str, names: dict, retries: int = 3) -> None:
+    """Add a grpc_server entry to the shared workspace ConfigMap.
 
-    workspace = yaml.safe_load(cm.data.get("workspace.yaml", "load_from: []"))
-    if not workspace or "load_from" not in workspace:
-        workspace = {"load_from": []}
-
+    Uses retry on 409 conflict (optimistic concurrency via resourceVersion).
+    """
     service_host = f"{names['service']}.{DAGSTER_NAMESPACE}.svc.cluster.local"
     location_name = f"org-{org_id}"
 
-    for entry in workspace["load_from"]:
-        if isinstance(entry, dict) and "grpc_server" in entry:
-            if entry["grpc_server"].get("location_name") == location_name:
-                log.info("Workspace entry for %s already exists", location_name)
-                return
+    for attempt in range(retries):
+        # Read or create the ConfigMap
+        try:
+            cm = _core_v1.read_namespaced_config_map(
+                name=WORKSPACE_CONFIGMAP, namespace=DAGSTER_NAMESPACE,
+            )
+        except client.ApiException as e:
+            if e.status == 404:
+                cm = client.V1ConfigMap(
+                    api_version="v1",
+                    kind="ConfigMap",
+                    metadata=client.V1ObjectMeta(
+                        name=WORKSPACE_CONFIGMAP,
+                        namespace=DAGSTER_NAMESPACE,
+                        labels={"managed-by": "kolkhis"},
+                    ),
+                    data={"workspace.yaml": "load_from: []\n"},
+                )
+                _core_v1.create_namespaced_config_map(namespace=DAGSTER_NAMESPACE, body=cm)
+            else:
+                raise
 
-    workspace["load_from"].append({
-        "grpc_server": {
-            "host": service_host,
-            "port": 3030,
-            "location_name": location_name,
-        }
-    })
+        workspace = yaml.safe_load(cm.data.get("workspace.yaml", "load_from: []"))
+        if not workspace or "load_from" not in workspace:
+            workspace = {"load_from": []}
 
-    cm.data["workspace.yaml"] = yaml.dump(workspace, default_flow_style=False)
-    _core_v1.replace_namespaced_config_map(
-        name=WORKSPACE_CONFIGMAP, namespace=DAGSTER_NAMESPACE, body=cm,
-    )
-    log.info("Updated workspace ConfigMap with %s", location_name)
+        # Check if entry already exists
+        for entry in workspace["load_from"]:
+            if isinstance(entry, dict) and "grpc_server" in entry:
+                if entry["grpc_server"].get("location_name") == location_name:
+                    log.info("Workspace entry for %s already exists", location_name)
+                    return
+
+        workspace["load_from"].append({
+            "grpc_server": {
+                "host": service_host,
+                "port": 3030,
+                "location_name": location_name,
+            }
+        })
+
+        cm.data["workspace.yaml"] = yaml.dump(workspace, default_flow_style=False)
+        try:
+            _core_v1.replace_namespaced_config_map(
+                name=WORKSPACE_CONFIGMAP, namespace=DAGSTER_NAMESPACE, body=cm,
+            )
+            log.info("Updated workspace ConfigMap with %s", location_name)
+            return
+        except client.ApiException as e:
+            if e.status == 409 and attempt < retries - 1:
+                log.warning("ConfigMap conflict, retrying (%d/%d)", attempt + 1, retries)
+                continue
+            raise
 
 
 def _provision_sync(org_id: str) -> None:

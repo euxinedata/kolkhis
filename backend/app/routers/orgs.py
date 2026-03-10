@@ -213,10 +213,8 @@ async def create_org(
             owner=org.id,
         )
         await _create_org_storage(org.id, db)
-        # Prime dagster-code with the new org's repo
-        if DAGSTER_MODE == "k8s":
-            asyncio.create_task(_provision_dagster_k8s(org.id))
-        else:
+        # Prime dagster-code (local mode only — fire-and-forget)
+        if DAGSTER_MODE != "k8s":
             try:
                 headers = {}
                 if DAGSTER_RELOAD_TOKEN:
@@ -240,9 +238,11 @@ async def create_org(
 
     await db.commit()
 
-    # In K8s mode, provision the org's shell pod before workspace setup
+    # In K8s mode, provision background pods (shell + dagster)
     if SHELL_MODE == "k8s":
         asyncio.create_task(_provision_shell_k8s(org.id))
+    if DAGSTER_MODE == "k8s":
+        asyncio.create_task(_provision_dagster_k8s(org.id))
 
     # Provision shell user + clone repo in background
     asyncio.create_task(_provision_workspace(
