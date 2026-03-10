@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import httpx
 import s3fs
@@ -203,8 +204,10 @@ async def create_org(
         await create_gitea_org(org.id)
         await create_repo(WAREHOUSE_REPO, owner=org.id)
         dagster_service = f"dagster-code-{org.id}" if DAGSTER_MODE == "k8s" else "dagster-code"
+        # dbt project name must be a valid Python identifier (no spaces/special chars)
+        dbt_name = re.sub(r"[^a-zA-Z0-9]+", "_", body.name).strip("_").lower()
         scaffold = {
-            path: content.replace("{name}", body.name).replace("{dagster_service}", dagster_service)
+            path: content.replace("{name}", dbt_name).replace("{dagster_service}", dagster_service)
             for path, content in _WAREHOUSE_SCAFFOLD.items()
         }
         await create_files_batch(
