@@ -12,6 +12,7 @@ from app.auth import make_service_token, require_auth
 from app.config import (
     S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME,
     SHELL_MODE, DAGSTER_CODE_URL, DAGSTER_RELOAD_TOKEN, SHELL_BACKEND_URL,
+    DAGSTER_MODE,
 )
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
@@ -145,6 +146,16 @@ async def _provision_shell_k8s(org_id: str) -> None:
         logger.exception("K8s shell provisioning failed for org %s", org_id)
 
 
+async def _provision_dagster_k8s(org_id: str) -> None:
+    """Background task: provision K8s dagster-code pod for an org."""
+    try:
+        from app.dagster_k8s import provision_dagster_pod
+        await provision_dagster_pod(org_id)
+        logger.info("K8s dagster pod provisioned for org %s", org_id)
+    except Exception:
+        logger.exception("K8s dagster provisioning failed for org %s", org_id)
+
+
 async def _provision_workspace(
     user_id: int, org_id: str, email: str, user_name: str,
 ) -> None:
@@ -202,23 +213,26 @@ async def create_org(
         )
         await _create_org_storage(org.id, db)
         # Prime dagster-code with the new org's repo
-        try:
-            headers = {}
-            if DAGSTER_RELOAD_TOKEN:
-                headers["Authorization"] = f"Bearer {DAGSTER_RELOAD_TOKEN}"
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(
-                    f"{DAGSTER_CODE_URL}/reload",
-                    json={
-                        "org_id": org.id,
-                        "repo": WAREHOUSE_REPO,
-                        "auth_token": make_service_token(org.id),
-                        "backend_url": SHELL_BACKEND_URL,
-                    },
-                    headers=headers,
-                )
-        except Exception:
-            logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)
+        if DAGSTER_MODE == "k8s":
+            asyncio.create_task(_provision_dagster_k8s(org.id))
+        else:
+            try:
+                headers = {}
+                if DAGSTER_RELOAD_TOKEN:
+                    headers["Authorization"] = f"Bearer {DAGSTER_RELOAD_TOKEN}"
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"{DAGSTER_CODE_URL}/reload",
+                        json={
+                            "org_id": org.id,
+                            "repo": WAREHOUSE_REPO,
+                            "auth_token": make_service_token(org.id),
+                            "backend_url": SHELL_BACKEND_URL,
+                        },
+                        headers=headers,
+                    )
+            except Exception:
+                logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)
     except Exception as exc:
         logger.error("Org provisioning failed for %s: %s", org.id, exc)
         raise HTTPException(status_code=502, detail="Failed to provision organization")
