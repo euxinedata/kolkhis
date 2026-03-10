@@ -471,8 +471,12 @@
   background: #1e1e1e;
 }
 
-/* VCS status colors (PyCharm dark convention) */
-.vcs-new {
+/* VCS status colors (PyCharm Darcula convention) */
+.vcs-untracked {
+  color: #d1675a !important;
+}
+
+.vcs-added {
   color: #629755 !important;
 }
 

@@ -187,8 +187,10 @@ async def git_status(org_id: str, shell_username: str, repo_name: str) -> dict[s
             continue
         code = line[:2]
         filepath = line[3:]
-        if code in ("??", "A ", " A"):
-            result[filepath] = "new"
+        if code == "??":
+            result[filepath] = "untracked"
+        elif code in ("A ", " A"):
+            result[filepath] = "added"
         elif code in ("M ", " M", "MM"):
             result[filepath] = "modified"
         elif code in ("D ", " D"):
