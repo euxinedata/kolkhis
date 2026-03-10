@@ -82,10 +82,6 @@ GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "kolkhis-admin")
 GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 HOMES_PATH = os.environ.get("HOMES_PATH", "./data/homes")
 
-# Dagster code deployment
-DAGSTER_CODE_URL = os.environ.get("DAGSTER_CODE_URL", "http://dagster-code:3031")
-DAGSTER_RELOAD_TOKEN = os.environ.get("DAGSTER_RELOAD_TOKEN", "")
-
 # Shell pod configuration
 SHELL_MODE = os.environ.get("SHELL_MODE", "local")  # "local" or "k8s"
 SHELL_NAMESPACE = os.environ.get("SHELL_NAMESPACE", "kolkhis")
@@ -97,3 +93,10 @@ SHELL_SSH_PORT = int(os.environ.get("SHELL_SSH_PORT", "2222"))
 _default_key_path = Path(__file__).resolve().parent.parent.parent / "shell" / "keys" / "id_ed25519"
 SHELL_SSH_KEY_PATH = os.environ.get("SHELL_SSH_KEY_PATH", str(_default_key_path))
 SHELL_SSH_PUBKEY_PATH = os.environ.get("SHELL_SSH_PUBKEY_PATH", str(_default_key_path.with_suffix(".pub")))
+
+# Dagster code deployment
+DAGSTER_CODE_URL = os.environ.get("DAGSTER_CODE_URL", "http://dagster-code:3031")
+DAGSTER_RELOAD_TOKEN = os.environ.get("DAGSTER_RELOAD_TOKEN", "")
+DAGSTER_MODE = os.environ.get("DAGSTER_MODE", "local")  # "local" or "k8s"
+DAGSTER_IMAGE = os.environ.get("DAGSTER_IMAGE", "ghcr.io/euxinedata/kolkhis-dagster:latest")
+DAGSTER_NAMESPACE = os.environ.get("DAGSTER_NAMESPACE", SHELL_NAMESPACE)

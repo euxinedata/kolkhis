@@ -198,6 +198,19 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # K8s self-healing: auto-clone and start gRPC on boot if DAGSTER_ORG_ID is set
+    org_id = os.environ.get("DAGSTER_ORG_ID")
+    if org_id:
+        repo = os.environ.get("DAGSTER_REPO", "warehouse")
+        auth_token = os.environ.get("KOLKHIS_AUTH_TOKEN")
+        backend_url = os.environ.get("KOLKHIS_BACKEND_URL")
+        log.info("K8s mode: auto-loading org %s repo %s", org_id, repo)
+        try:
+            result = _do_reload(org_id, repo, auth_token=auth_token, backend_url=backend_url)
+            log.info("Auto-load result: %s", result)
+        except Exception:
+            log.exception("Auto-load failed for org %s (will retry on /reload)", org_id)
+
     def _shutdown(signum, _frame):
         log.info("Shutting down (signal %d)", signum)
         _stop_grpc()

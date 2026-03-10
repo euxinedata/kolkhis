@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import httpx
 import s3fs
@@ -12,6 +13,7 @@ from app.auth import make_service_token, require_auth
 from app.config import (
     S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_REGION, S3_BUCKET_NAME,
     SHELL_MODE, DAGSTER_CODE_URL, DAGSTER_RELOAD_TOKEN, SHELL_BACKEND_URL,
+    DAGSTER_MODE,
 )
 from app.database import get_db, async_session
 from app.gitea import create_gitea_org, create_repo, create_files_batch
@@ -126,7 +128,7 @@ jobs:
     steps:
       - run: |
           REPO_OWNER=$(echo $GITHUB_REPOSITORY | cut -d/ -f1)
-          curl -sf -X POST http://dagster-code:3031/reload \\
+          curl -sf -X POST http://{dagster_service}:3031/reload \\
             -H 'Content-Type: application/json' \\
             -H 'Authorization: Bearer dagster-reload-dev' \\
             -d "{\\"org_id\\": \\"$REPO_OWNER\\", \\"repo\\": \\"warehouse\\"}"
@@ -143,6 +145,16 @@ async def _provision_shell_k8s(org_id: str) -> None:
         logger.info("K8s shell pod provisioned for org %s", org_id)
     except Exception:
         logger.exception("K8s shell provisioning failed for org %s", org_id)
+
+
+async def _provision_dagster_k8s(org_id: str) -> None:
+    """Background task: provision K8s dagster-code pod for an org."""
+    try:
+        from app.dagster_k8s import provision_dagster_pod
+        await provision_dagster_pod(org_id)
+        logger.info("K8s dagster pod provisioned for org %s", org_id)
+    except Exception:
+        logger.exception("K8s dagster provisioning failed for org %s", org_id)
 
 
 async def _provision_workspace(
@@ -191,8 +203,11 @@ async def create_org(
     try:
         await create_gitea_org(org.id)
         await create_repo(WAREHOUSE_REPO, owner=org.id)
+        dagster_service = f"dagster-code-{org.id}" if DAGSTER_MODE == "k8s" else "dagster-code"
+        # dbt project name must be a valid Python identifier (no spaces/special chars)
+        dbt_name = re.sub(r"[^a-zA-Z0-9]+", "_", body.name).strip("_").lower()
         scaffold = {
-            path: content.replace("{name}", body.name)
+            path: content.replace("{name}", dbt_name).replace("{dagster_service}", dagster_service)
             for path, content in _WAREHOUSE_SCAFFOLD.items()
         }
         await create_files_batch(
@@ -201,33 +216,36 @@ async def create_org(
             owner=org.id,
         )
         await _create_org_storage(org.id, db)
-        # Prime dagster-code with the new org's repo
-        try:
-            headers = {}
-            if DAGSTER_RELOAD_TOKEN:
-                headers["Authorization"] = f"Bearer {DAGSTER_RELOAD_TOKEN}"
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.post(
-                    f"{DAGSTER_CODE_URL}/reload",
-                    json={
-                        "org_id": org.id,
-                        "repo": WAREHOUSE_REPO,
-                        "auth_token": make_service_token(org.id),
-                        "backend_url": SHELL_BACKEND_URL,
-                    },
-                    headers=headers,
-                )
-        except Exception:
-            logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)
+        # Prime dagster-code (local mode only — fire-and-forget)
+        if DAGSTER_MODE != "k8s":
+            try:
+                headers = {}
+                if DAGSTER_RELOAD_TOKEN:
+                    headers["Authorization"] = f"Bearer {DAGSTER_RELOAD_TOKEN}"
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"{DAGSTER_CODE_URL}/reload",
+                        json={
+                            "org_id": org.id,
+                            "repo": WAREHOUSE_REPO,
+                            "auth_token": make_service_token(org.id),
+                            "backend_url": SHELL_BACKEND_URL,
+                        },
+                        headers=headers,
+                    )
+            except Exception:
+                logger.warning("dagster-code reload failed for org %s (non-fatal)", org.id)
     except Exception as exc:
         logger.error("Org provisioning failed for %s: %s", org.id, exc)
         raise HTTPException(status_code=502, detail="Failed to provision organization")
 
     await db.commit()
 
-    # In K8s mode, provision the org's shell pod before workspace setup
+    # In K8s mode, provision background pods (shell + dagster)
     if SHELL_MODE == "k8s":
         asyncio.create_task(_provision_shell_k8s(org.id))
+    if DAGSTER_MODE == "k8s":
+        asyncio.create_task(_provision_dagster_k8s(org.id))
 
     # Provision shell user + clone repo in background
     asyncio.create_task(_provision_workspace(
