@@ -1,0 +1,253 @@
+.ci-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.ci-modal {
+  background: #0a0a0a;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+  padding: 1.5em;
+  max-width: 900px;
+  width: 92%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ci-modal-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.75em;
+  flex-shrink: 0;
+}
+
+.ci-modal-header-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #909090;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  flex: 1;
+}
+
+.ci-modal-close {
+  background: none;
+  border: none;
+  color: #606060;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 0.3em;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.ci-modal-close:hover {
+  color: #909090;
+}
+
+/* Run list */
+.ci-run-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+}
+
+.ci-modal li {
+  list-style: none;
+  list-style-type: none;
+}
+
+.ci-modal ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ci-run-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.5em 0.4em;
+  border-bottom: 1px solid #1e1e1e;
+  cursor: pointer;
+  font-size: 0.82em;
+  color: #909090;
+}
+
+.ci-run-item:hover {
+  background: #151515;
+}
+
+.ci-run-item:last-child {
+  border-bottom: none;
+}
+
+.ci-run-status {
+  flex-shrink: 0;
+  font-weight: 600;
+  width: 16px;
+  text-align: center;
+}
+
+.ci-run-status.success { color: #629755; }
+.ci-run-status.failure { color: #cf6679; }
+.ci-run-status.running { color: #d4850a; }
+
+.ci-run-name {
+  color: rgba(255, 255, 255, 0.87);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ci-run-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #909090;
+}
+
+.ci-run-branch {
+  flex-shrink: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606060;
+}
+
+.ci-run-time {
+  flex-shrink: 0;
+  color: #606060;
+  font-size: 0.95em;
+}
+
+/* Log header */
+.ci-log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  margin-bottom: 0.75em;
+  flex-shrink: 0;
+}
+
+.ci-log-back {
+  background: none;
+  border: none;
+  color: #909090;
+  font-size: 0.85em;
+  cursor: pointer;
+  padding: 0.2em 0.4em;
+}
+
+.ci-log-back:hover {
+  color: #d4850a;
+}
+
+.ci-log-run-info {
+  font-size: 0.82em;
+  color: #909090;
+}
+
+.ci-log-run-info .ci-run-status {
+  display: inline;
+  width: auto;
+}
+
+/* Steps container */
+.ci-steps-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Individual step */
+.ci-step {
+  border-bottom: 1px solid #1e1e1e;
+}
+
+.ci-step:last-child {
+  border-bottom: none;
+}
+
+.ci-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em 0.4em;
+  cursor: pointer;
+  font-size: 0.82em;
+  user-select: none;
+}
+
+.ci-step-header:hover {
+  background: #151515;
+}
+
+.ci-step-arrow {
+  color: #909090;
+  width: 14px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.ci-step-status {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.ci-step-status.success { color: #629755; }
+.ci-step-status.failure { color: #cf6679; }
+.ci-step-status.running { color: #d4850a; }
+
+.ci-step-name {
+  color: rgba(255, 255, 255, 0.87);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-step-duration {
+  color: #606060;
+  font-size: 0.9em;
+  flex-shrink: 0;
+}
+
+.ci-step-log {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #ccc;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #060606;
+  margin: 0;
+  padding: 0.5em 0.75em;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ci-log-loading {
+  color: #606060;
+  font-size: 0.85em;
+  padding: 1.5em 0;
+  text-align: center;
+}
+
+.ci-run-empty {
+  color: #606060;
+  font-size: 0.85em;
+  padding: 1.5em 0;
+  text-align: center;
+}

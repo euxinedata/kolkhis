@@ -266,6 +266,19 @@ async def create_pull_request(
         return resp.json()
 
 
+async def list_pull_requests(
+    repo: str, state: str = "open", owner: str = GITEA_ADMIN_USER,
+) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            _api(f"/repos/{owner}/{repo}/pulls"),
+            headers=_headers(),
+            params={"state": state, "limit": 20},
+        )
+        resp.raise_for_status()
+    return resp.json()
+
+
 async def merge_pull_request(repo: str, pr_number: int, owner: str = GITEA_ADMIN_USER) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
