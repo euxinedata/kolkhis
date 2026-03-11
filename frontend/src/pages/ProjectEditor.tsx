@@ -19,6 +19,8 @@ import { CatalogPanel } from '../components/CatalogPanel'
 import { useStatusBar } from '../StatusBarContext'
 import { DatabaseDetail, SchemaDetail, ObjectDetail } from '../components/CatalogDetails'
 import { defineKolkhisTheme, THEME_NAME } from '../monacoTheme'
+import { PullRequestModal } from '../components/PullRequestModal'
+import { CIModal } from '../components/CIModal'
 import './ProjectEditor.css'
 
 
@@ -369,6 +371,11 @@ export function ProjectEditor() {
   const [ciStatus, setCiStatus] = useState<{
     status?: string; head_sha?: string
   } | null>(null)
+  const [branchInfo, setBranchInfo] = useState<{
+    branch: string; is_main: boolean; pushed: boolean
+  } | null>(null)
+  const [prModalOpen, setPrModalOpen] = useState(false)
+  const [ciModalOpen, setCiModalOpen] = useState(false)
 
   useEffect(() => {
     const fetchCi = async () => {
@@ -378,8 +385,14 @@ export function ProjectEditor() {
         else setCiStatus(null)
       } catch { setCiStatus(null) }
     }
+    const fetchBranch = async () => {
+      try {
+        setBranchInfo(await apiFetch('/api/pr/branch'))
+      } catch { /* ignore */ }
+    }
     fetchCi()
-    const interval = setInterval(fetchCi, 30000)
+    fetchBranch()
+    const interval = setInterval(() => { fetchCi(); fetchBranch() }, 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -1000,10 +1013,17 @@ export function ProjectEditor() {
                 }
               }}
             >&#x21bb;</button>
+            <button
+              className={`sidebar-pr-btn${branchInfo && !branchInfo.is_main ? ' on-branch' : ''}`}
+              title={branchInfo ? `Branch: ${branchInfo.branch}` : 'Pull requests'}
+              onClick={() => setPrModalOpen(true)}
+            >PR</button>
             {ciStatus && (
               <span
                 className={`ci-status-badge ci-status-${ciStatus.status}`}
                 title={`CI: ${ciStatus.status} (${ciStatus.head_sha})`}
+                onClick={() => setCiModalOpen(true)}
+                style={{ cursor: 'pointer' }}
               >
                 {ciStatus.status === 'success' ? '✓' :
                  ciStatus.status === 'failure' ? '✗' :
@@ -1308,6 +1328,15 @@ export function ProjectEditor() {
           </div>
         )
       })()}
+      {prModalOpen && (
+        <PullRequestModal
+          onClose={() => setPrModalOpen(false)}
+          branchInfo={branchInfo}
+        />
+      )}
+      {ciModalOpen && (
+        <CIModal onClose={() => setCiModalOpen(false)} />
+      )}
     </div>
   )
 }

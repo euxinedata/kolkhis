@@ -10,7 +10,7 @@ from app.shell import ensure_shell_user
 from app.workspace import (
     list_files as ws_list_files, read_file, write_file,
     create_directory, rename_path, delete_path, git_status,
-    is_clone_ready,
+    is_clone_ready, refresh_remote,
 )
 
 router = APIRouter(prefix="/api/workspace")
@@ -50,6 +50,7 @@ async def _get_workspace(user: dict, db: AsyncSession) -> tuple[str, str, str]:
     )
     if not is_clone_ready(org_id, shell_username, WAREHOUSE_REPO):
         raise HTTPException(status_code=503, detail="Workspace is being prepared")
+    await refresh_remote(org_id, shell_username, WAREHOUSE_REPO, gitea_org)
     return org_id, shell_username, gitea_org
 
 

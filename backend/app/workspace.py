@@ -90,6 +90,13 @@ def is_clone_ready(org_id: str, shell_username: str, repo_name: str) -> bool:
     return _repo_path(org_id, shell_username, repo_name).exists()
 
 
+async def refresh_remote(org_id: str, shell_username: str, repo_name: str, owner: str = GITEA_ADMIN_USER) -> None:
+    """Update the remote URL with the current Gitea API token."""
+    dest = _repo_path(org_id, shell_username, repo_name)
+    if dest.exists():
+        await _run_git("remote", "set-url", "origin", _shell_remote_url(repo_name, owner), cwd=dest)
+
+
 def remove_repo(org_id: str, shell_username: str, repo_name: str) -> None:
     dest = _repo_path(org_id, shell_username, repo_name)
     if dest.exists():
@@ -176,6 +183,23 @@ def rename_path(org_id: str, shell_username: str, repo_name: str, old_path: str,
     if new.exists():
         raise FileExistsError(f"Path already exists: {new_path}")
     old.rename(new)
+
+
+async def git_branch(org_id: str, shell_username: str, repo_name: str) -> str:
+    """Return current branch name."""
+    root = _repo_path(org_id, shell_username, repo_name)
+    output = await _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+    return output.strip()
+
+
+async def git_branch_pushed(org_id: str, shell_username: str, repo_name: str, branch: str) -> bool:
+    """Check if branch has been pushed to remote."""
+    root = _repo_path(org_id, shell_username, repo_name)
+    try:
+        await _run_git("rev-parse", "--verify", f"refs/remotes/origin/{branch}", cwd=root)
+        return True
+    except RuntimeError:
+        return False
 
 
 async def git_status(org_id: str, shell_username: str, repo_name: str) -> dict[str, str]:
